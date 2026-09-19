@@ -41,9 +41,11 @@ async function pump() {
   const job = queue.shift();
   running = job; stopRequested = false;
   const db = open();
+  const startedAt = now();
   const progress = (done, total, message) => {
+    lastProgress = { id: job.id, done, total, message, started_at: startedAt };
     db.prepare("UPDATE jobs SET progress_done=?, progress_total=?, message=?, status='running' WHERE id=?").run(done, total, message || null, job.id);
-    events.emit("job", { id: job.id, kind: job.kind, target: job.target, status: "running", done, total, message });
+    events.emit("job", { id: job.id, kind: job.kind, target: job.target, status: "running", done, total, message, started_at: startedAt, queued: queue.length });
   };
   db.prepare("UPDATE jobs SET status='running', started_at=? WHERE id=?").run(now(), job.id);
   try {
@@ -57,7 +59,8 @@ async function pump() {
 }
 
 function stop() { stopRequested = true; queue.length = 0; }
-function current() { return running ? { id: running.id, kind: running.kind, target: running.target, queued: queue.length } : null; }
+let lastProgress = null;
+function current() { return running ? { id: running.id, kind: running.kind, target: running.target, queued: queue.length, status: "running", ...(lastProgress && lastProgress.id === running.id ? { done: lastProgress.done, total: lastProgress.total, message: lastProgress.message, started_at: lastProgress.started_at } : {}) } : null; }
 
 // ---------------------------------------------------------------- embedding + storage
 async function storeDocument({ source, kind, locator, title, mime, bytes, pages, page_count, ocr_pages, fetched_at }, progressNote) {

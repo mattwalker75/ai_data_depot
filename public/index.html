@@ -13,7 +13,7 @@
   <nav class="rail" aria-label="Main">
     <div class="logo" title="AI Data Depot"></div>
     <button class="nav on" data-view="chat"><i class="ic ic-chat"></i>Chat</button>
-    <button class="nav" data-view="sources"><i class="ic ic-src"></i>Sources</button>
+    <button class="nav" data-view="sources"><i class="ic ic-src"></i>Sources<span class="badge" id="sources-badge" hidden></span></button>
     <button class="nav" data-view="personas"><i class="ic ic-per"></i>Personas</button>
     <button class="nav" data-view="sessions"><i class="ic ic-ses"></i>Sessions</button>
     <div class="grow"></div>
@@ -31,7 +31,6 @@
   </div></aside>
 
   <main class="main" id="main">
-    <div class="jobbar" id="jobbar" hidden><div class="jb-spin"></div><div class="jb-text"><b id="jb-title"></b><span id="jb-detail"></span></div><div class="jb-bar"><i id="jb-fill"></i></div><button class="btn sm" id="jb-stop">Stop</button></div>
     <!-- ================= CHAT ================= -->
     <section class="view on" id="view-chat">
       <header class="head">
@@ -72,7 +71,7 @@
     <section class="view" id="view-sources">
       <header class="head"><div class="t">Sources<small>Bundles of folders and websites the assistant may read</small></div><div class="sp"></div>
         <button class="btn" id="index-files-btn">Re-index files</button><button class="btn" id="index-web-btn">Re-check websites</button><button class="btn pri" id="new-bundle-btn2">+ New bundle</button></header>
-      <div class="page" id="sources-page"></div>
+      <div class="page"><div class="card jobcard" id="jobcard" hidden></div><div id="sources-page" class="stack"></div></div>
     </section>
 
     <!-- ================= PERSONAS ================= -->

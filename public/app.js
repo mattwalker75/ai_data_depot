@@ -73,7 +73,7 @@ async function refresh() {
   Object.assign(state, { config: s.config, bundles: s.bundles, personas: s.personas, sessions: s.sessions, presets: s.presets || state.presets, meta: { version: s.version, config_path: s.config_path, data_dir: s.data_dir, sqlite_vec: s.sqlite_vec, restart_required: s.restart_required } });
   applyTheme(state.config.appearance.theme);
   renderBundles(); renderPersonaSelect(); renderSessionsMenu(); renderWelcome(); renderIndexNotice();
-  if (s.job) showJob({ status: "running", ...s.job });
+  if (s.job) showJob({ status: "running", ...s.job }); else if (!$("#jobcard").hidden) showJob(null);
 }
 function enabledBundleIds() { return state.bundles.filter((b) => b.enabled).map((b) => b.id); }
 
@@ -304,7 +304,7 @@ function renderSources() {
   el.innerHTML = state.bundles.map((b) => `<div class="card" data-bundle="${b.id}">
     <div class="ct"><button class="toggle ${b.enabled ? "on" : ""}" data-toggle="${b.id}" title="${b.enabled ? "On — the assistant may read this bundle" : "Off"}" aria-label="Enable bundle"></button><input class="session-name" data-rename="${b.id}" value="${esc(b.name)}" aria-label="Bundle name"><span class="sp"></span>
       <button class="btn sm" data-addpath="${b.id}">+ Folder or file</button><button class="btn sm" data-addweb="${b.id}">+ Website</button><button class="btn sm" data-docs="${b.id}">Documents</button><button class="btn sm danger" data-delbundle="${b.id}">Delete</button></div>
-    ${b.sources.length ? b.sources.map((s) => `<div class="srcline ${s.status === "indexing" ? "busy" : ""}" data-loc="${esc(s.location)}"><span class="k">${s.kind === "website" ? "website" : "folder"}</span><span class="loc" title="${esc(s.location)}">${esc(s.location)}</span>${srcMeta(s)}<button class="btn sm ${s.status === "pending" ? "pri" : ""}" data-reindex="${s.id}" data-label="${s.status === "pending" ? "Index" : s.kind === "website" ? "Re-check" : "Re-index"}" ${s.status === "indexing" ? "disabled" : ""}>${s.status === "indexing" ? `<span class="spin"></span>Indexing…` : s.status === "pending" ? "Index" : s.kind === "website" ? "Re-check" : "Re-index"}</button><button class="btn sm danger" data-delsrc="${s.id}">Remove</button></div>`).join("") : `<div class="hint">No sources yet — add a folder, a file, or a website.</div>`}
+    ${b.sources.length ? b.sources.map((s) => `<div class="srcline ${s.status === "indexing" ? "busy" : ""}" data-loc="${esc(s.location)}"><span class="k">${s.kind === "website" ? "website" : "folder"}</span><span class="loc" title="${esc(s.location)}">${esc(s.location)}</span>${srcMeta(s)}<span class="live"></span><button class="btn sm ${s.status === "pending" ? "pri" : ""}" data-reindex="${s.id}" data-label="${s.status === "pending" ? "Index" : s.kind === "website" ? "Re-check" : "Re-index"}" ${s.status === "indexing" ? "disabled" : ""}>${s.status === "indexing" ? `<span class="spin"></span>Indexing…` : s.status === "pending" ? "Index" : s.kind === "website" ? "Re-check" : "Re-index"}</button><button class="btn sm danger" data-delsrc="${s.id}">Remove</button></div>`).join("") : `<div class="hint">No sources yet — add a folder, a file, or a website.</div>`}
     <div class="docs" id="docs-${b.id}" hidden></div></div>`).join("");
   $$("[data-toggle]", el).forEach((t) => t.addEventListener("click", guard(async () => { await api(`/api/bundles/${t.dataset.toggle}`, { method: "PATCH", body: { enabled: !t.classList.contains("on") } }); await refresh(); renderSources(); })));
   $$("[data-rename]", el).forEach((i) => i.addEventListener("change", guard(async () => { await api(`/api/bundles/${i.dataset.rename}`, { method: "PATCH", body: { name: i.value } }); await refresh(); })));
@@ -351,31 +351,52 @@ function browse() {
     go(cur).then(() => dlg.showModal()).catch((e) => { toast(e.message); resolve(null); });
   });
 }
-// index progress (SSE): the job bar shows in every view; the source row
-// being worked on is marked too, so clicking Index has a visible effect.
+// Index progress (SSE). A pulsing badge on the Sources rail icon says
+// "something is indexing"; the detail — files done of total, the current
+// file, an estimate of time left, Stop — lives on the Sources page, on a card
+// at the top and on the row being worked on.
+const jobStats = { id: null, t0: 0, d0: 0 };
+function fmtLeft(sec) { if (!isFinite(sec) || sec < 0) return ""; if (sec < 60) return "under a minute left"; if (sec < 3600) return `about ${Math.round(sec / 60)} min left`; return `about ${(sec / 3600).toFixed(1)} h left`; }
 function showJob(j) {
-  const strip = $("#idx-strip"), bar = $("#jobbar");
+  const strip = $("#idx-strip"), badge = $("#sources-badge"), card = $("#jobcard");
   const finished = !j || ["done", "failed", "stopped"].includes(j.status);
   if (finished) {
-    strip.hidden = true; bar.hidden = true;
+    strip.hidden = true; badge.hidden = true; card.hidden = true; jobStats.id = null;
+    $$(".srcline.busy").forEach((r) => r.classList.remove("busy"));
     if (j) toast(j.status === "failed" ? `Indexing failed: ${j.error}` : `${j.target}: ${j.message || j.status}`, 6000);
     refresh().then(() => state.view === "sources" && renderSources()).catch(() => {});
     return;
   }
+  const now = Date.now(); if (jobStats.id !== j.id) { jobStats.id = j.id; jobStats.t0 = now; jobStats.d0 = j.done || 0; }
+  const elapsed = (now - jobStats.t0) / 1000, rate = elapsed > 3 ? ((j.done || 0) - jobStats.d0) / elapsed : 0;
+  const left = j.total && rate > 0 ? fmtLeft((j.total - j.done) / rate) : (j.total ? "estimating…" : "");
   const pct = j.total ? Math.round((j.done / j.total) * 100) : 0;
-  const verb = j.kind === "website" ? "Reading" : "Indexing";
-  bar.hidden = false; $("#jb-title").textContent = `${verb} ${j.target}${j.total ? ` — ${j.done} of ${j.total}` : j.status === "queued" ? " — queued" : ""}`;
-  $("#jb-detail").textContent = j.message || ""; $("#jb-fill").style.width = pct + "%";
-  strip.hidden = false; $("#idx-fill").style.width = pct + "%"; $("#idx-msg").textContent = `${verb} ${j.target}${j.total ? ` — ${j.done}/${j.total}` : ""}${j.message ? " · " + j.message : ""}`;
-  // mark the matching source row(s) on the Sources page
+  const verb = j.kind === "website" ? "Reading" : "Indexing", unit = j.kind === "website" ? "pages" : "files";
+  badge.hidden = false; badge.title = `${verb} ${j.target}${j.total ? ` — ${j.done} of ${j.total} ${unit}` : ""}`;
+  strip.hidden = false; $("#idx-fill").style.width = pct + "%"; $("#idx-msg").textContent = `${verb}… ${j.total ? `${j.done}/${j.total} ${unit}` : ""} ${left}`.trim();
+  card.hidden = false;
+  card.innerHTML = `<div class="ct"><span class="spin"></span>${verb} ${esc(j.target)}<span class="sp"></span><button class="btn sm" id="jc-stop">Stop after this ${unit.slice(0, -1)}</button></div>
+    <div class="prog"><i style="width:${pct}%"></i></div>
+    <div class="meta"><span><b>${j.done || 0}</b> of <b>${j.total || "?"}</b> ${unit} ${j.kind === "website" ? "read" : "checked"}</span><span>${pct}%</span><span>${esc(left)}</span>${j.queued ? `<span>${j.queued} more job${j.queued > 1 ? "s" : ""} queued</span>` : ""}</div>
+    ${j.message ? `<div class="cur" title="${esc(j.message)}">${esc(j.message)}</div>` : ""}`;
+  $("#jc-stop").onclick = guard(async () => { $("#jc-stop").disabled = true; $("#jc-stop").textContent = "Stopping…"; const r = await api("/api/index/stop", { method: "POST" }); if (!r.was_running) showJob(null); });
   $$(".srcline[data-loc]").forEach((row) => {
     const busy = String(j.target).startsWith(row.dataset.loc);
     row.classList.toggle("busy", busy);
+    const live = row.querySelector(".live"); if (live) live.textContent = busy && j.total ? `${j.done}/${j.total} ${unit}` : "";
     const btn = row.querySelector("[data-reindex]");
     if (btn) { if (busy) { btn.disabled = true; btn.innerHTML = `<span class="spin"></span>Indexing…`; } else if (btn.disabled) { btn.disabled = false; btn.textContent = btn.dataset.label || "Re-index"; } }
   });
 }
-function wireIndexEvents() { const es = new EventSource("/api/index/events"); es.addEventListener("job", (e) => showJob(JSON.parse(e.data))); es.onerror = () => {}; }
+function wireIndexEvents() {
+  const es = new EventSource("/api/index/events");
+  es.addEventListener("job", (e) => showJob(JSON.parse(e.data)));
+  // On (re)connect the server says what is actually running — after a
+  // restart that is usually nothing, and the page must not keep showing a
+  // job that died with the old process.
+  es.addEventListener("hello", (e) => { const h = JSON.parse(e.data); showJob(h.current ? { status: "running", ...h.current } : null); });
+  es.onerror = () => {};
+}
 
 // ---------------------------------------------------------------- personas page
 let editing = null;
@@ -539,7 +560,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#import-file").addEventListener("change", guard(async (e) => { if (e.target.files[0]) await importSessionFile(e.target.files[0]); e.target.value = ""; }));
   $("#new-session-btn").addEventListener("click", () => loadSessionIntoUi(newSessionObject()));
   $$("#new-bundle-btn, #new-bundle-btn2").forEach((b) => b.addEventListener("click", guard(newBundle)));
-  $("#jb-stop").addEventListener("click", guard(async () => { await api("/api/index/stop", { method: "POST" }); $("#jb-detail").textContent = "Stopping after the current item…"; }));
   $("#index-files-btn").addEventListener("click", guard(async () => { await api("/api/index/files", { method: "POST", body: {} }); toast("Re-indexing files."); }));
   $("#index-web-btn").addEventListener("click", guard(async () => { await api("/api/index/websites", { method: "POST", body: {} }); toast("Re-checking websites."); }));
   $("#new-persona-btn").addEventListener("click", () => editPersona({ id: null, name: "", description: "", prompt: "", builtin: false }, true));

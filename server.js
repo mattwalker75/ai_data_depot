@@ -115,13 +115,13 @@ app.post("/api/open", wrap((req, res) => {
 // ---------------------------------------------------------------- indexing
 app.post("/api/index/files", wrap((req, res) => res.json({ jobs: indexer.indexFiles({ bundleId: req.body.bundle_id }) })));
 app.post("/api/index/websites", wrap((req, res) => res.json({ jobs: indexer.indexWebsites({ bundleId: req.body.bundle_id }) })));
-app.post("/api/index/stop", wrap((req, res) => { indexer.stop(); res.json({ ok: true }); }));
+app.post("/api/index/stop", wrap((req, res) => { const was = indexer.current(); indexer.stop(); res.json({ ok: true, was_running: !!was }); }));
 app.get("/api/index/jobs", wrap((req, res) => res.json({ current: indexer.current(), jobs: indexer.jobs(30) })));
 app.get("/api/index/events", (req, res) => {
   const send = sse(res);
   const onJob = (j) => send("job", j);
   indexer.events.on("job", onJob);
-  send("hello", { current: indexer.current() });
+  send("hello", { current: indexer.current(), jobs: indexer.jobs(5) });
   const ping = setInterval(() => res.write(": ping\n\n"), 25000);
   res.on("close", () => { indexer.events.off("job", onJob); clearInterval(ping); });
 });

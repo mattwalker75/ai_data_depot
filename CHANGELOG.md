@@ -4,6 +4,18 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 
 ## [Unreleased]
 
+### Changed
+- 2026-09-19: **Indexing status lives with Sources.** The bar across the top is
+  gone; while indexing runs, the Sources icon in the rail carries a pulsing
+  badge, and the Sources page shows an "Indexing now" card: files (or pages)
+  done of the total, percent, an estimated time left from the measured rate,
+  the current file, how many jobs are queued, and a Stop button. The source
+  row being worked on shows the same count inline.
+- 2026-09-19: Fixed Stop sticking at "Stopping…" after a restart: the page
+  now reconciles with the server whenever the progress stream (re)connects,
+  and Stop clears immediately when nothing is running. A job interrupted by a
+  restart has to be started again — the page says so.
+
 ### Fixed
 - 2026-09-19: **Indexing had no visible progress** once the drawers were made
   Chat-only — clicking Index or Re-index produced a "Queued" toast and nothing
