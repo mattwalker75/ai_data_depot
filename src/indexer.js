@@ -218,6 +218,22 @@ function indexSource(sourceId) {
 }
 
 // ---------------------------------------------------------------- watching + schedule
+// How many directories one source may have before we stop watching it live
+// (macOS hands out a file descriptor per watched directory; past this it is
+// EMFILE and, unhandled, a dead process). Such sources are still indexed on
+// demand and on the schedule — they just don't pick up new files instantly.
+const WATCH_MAX_DIRS = 1500;
+
+function countDirs(root, limit) {
+  let n = 0;
+  (function walk(d, depth) {
+    if (n > limit || depth > 16) return;
+    let ents = []; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) { if (e.isDirectory() && !e.name.startsWith(".") && e.name !== "node_modules") { n++; walk(path.join(d, e.name), depth + 1); if (n > limit) return; } }
+  })(root, 0);
+  return n;
+}
+
 function startWatchers() {
   stopWatchers();
   if (!config.get().indexing.files.watch) return;
@@ -225,11 +241,16 @@ function startWatchers() {
   for (const s of sourcesOfKind("path")) {
     const root = config.expandHome(s.location);
     if (!fs.existsSync(root)) continue;
+    const dirs = fs.statSync(root).isDirectory() ? countDirs(root, WATCH_MAX_DIRS) : 0;
+    if (dirs > WATCH_MAX_DIRS) { console.warn(`[watch] ${s.location} has more than ${WATCH_MAX_DIRS} folders — not watched live; use Re-index`); continue; }
     const pending = new Set(); let timer = null;
-    const w = chokidar.watch(root, { ignoreInitial: true, ignored: /(^|[\/\\])\../, awaitWriteFinish: { stabilityThreshold: 1500 } });
+    const w = chokidar.watch(root, { ignoreInitial: true, ignored: /(^|[\/\\])(\.|node_modules)/, awaitWriteFinish: { stabilityThreshold: 1500 }, depth: 16 });
     const flush = () => { const files = [...pending].filter(supported); pending.clear(); if (files.length) enqueue("files", `${s.location} (${files.length} changed)`, (p) => indexPathSource(s, p, { only: files })); };
     const onChange = (f) => { pending.add(f); clearTimeout(timer); timer = setTimeout(flush, 2000); };
     w.on("add", onChange).on("change", onChange).on("unlink", () => { clearTimeout(timer); timer = setTimeout(() => enqueue("files", s.location, (p) => indexPathSource(s, p)), 2000); });
+    // A watcher error (EMFILE, a vanished mount) must never take the server
+    // down: stop watching that source and say so.
+    w.on("error", (e) => { console.warn(`[watch] ${s.location}: ${e.code || e.message} — live watching stopped for this source`); w.close().catch(() => {}); watchers.delete(s.id); });
     watchers.set(s.id, w);
   }
 }
@@ -249,4 +270,12 @@ function startScheduler() {
 
 function jobs(limit = 20) { return open().prepare("SELECT * FROM jobs ORDER BY id DESC LIMIT ?").all(limit); }
 
-module.exports = { events, indexFiles, indexWebsites, indexSource, stop, current, jobs, startWatchers, stopWatchers, startScheduler, walk };
+/** On startup: anything left 'running' or 'indexing' by a previous process died with it. */
+function recoverStaleState() {
+  const db = open();
+  const n = db.prepare("UPDATE jobs SET status='stopped', finished_at=?, error=coalesce(error,'interrupted — the app was restarted') WHERE status IN ('queued','running')").run(now()).changes;
+  db.prepare("UPDATE sources SET status = CASE WHEN doc_count > 0 THEN 'ok' ELSE 'pending' END, last_error = coalesce(last_error, 'Indexing was interrupted — run it again') WHERE status='indexing'").run();
+  if (n) console.warn(`[index] ${n} job(s) were interrupted by a restart`);
+}
+
+module.exports = { recoverStaleState, events, indexFiles, indexWebsites, indexSource, stop, current, jobs, startWatchers, stopWatchers, startScheduler, walk };

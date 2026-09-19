@@ -172,7 +172,10 @@ const host = process.env.HOST || cfg.server.host || "127.0.0.1";
 app.listen(port, host, () => {
   const url = `http://${host === "0.0.0.0" ? "localhost" : host}:${port}`;
   console.log(`AI Data Depot ${VERSION} — ${url}\n  config: ${config.CONFIG_PATH}\n  data:   ${config.dataDir()}\n  model:  ${cfg.models.active} (${cfg.models.providers[cfg.models.active].chat_model})`);
-  indexer.startWatchers(); indexer.startScheduler();
+  indexer.recoverStaleState(); indexer.startWatchers(); indexer.startScheduler();
   if (cfg.server.open_browser && !process.env.DEPOT_NO_OPEN) { const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open"; execFile(cmd, [url], () => {}); }
 });
 process.on("SIGINT", async () => { await require("./src/extract").shutdown(); process.exit(0); });
+// A stray error in a watcher or a background job is logged, not fatal.
+process.on("uncaughtException", (e) => console.error("[uncaught]", e && e.stack || e));
+process.on("unhandledRejection", (e) => console.error("[unhandled]", e && e.stack || e));

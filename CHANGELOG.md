@@ -5,6 +5,16 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 ## [Unreleased]
 
 ### Fixed
+- 2026-09-19: **Adding a large folder crashed the app** (`EMFILE: too many open
+  files, watch`): live folder watching asks macOS for a file descriptor per
+  sub-folder, and an unhandled watcher error killed the process. A source with
+  more than 1,500 folders is no longer watched live (it is still indexed on
+  demand and on the schedule, and the log says so); watcher errors stop
+  watching that one source instead of the server; uncaught errors are logged,
+  not fatal; and on startup, jobs and sources left "running"/"indexing" by a
+  crash are reset so they can be run again.
+
+### Fixed
 - 2026-09-19: The right drawer's handle vanished when that drawer was collapsed —
   it was positioned half outside the window, leaving a 7px sliver and no way to
   reopen the Evidence drawer. Collapsed handles now stay fully on-screen on both
