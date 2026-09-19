@@ -5,6 +5,17 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 ## [Unreleased]
 
 ### Added
+- 2026-09-19: `DEPOT.sh` takes dash flags (`-s/--start`, `-x/--stop`, `-r/--restart`,
+  `-i/--status`, `-l/--logs`, `-f/--fg`, `-c/--check`, `-t/--test`, `-h/--help`),
+  runs them in the order given, accepts the bare words too, and prints its
+  header as help. New `INSTALL_APP.sh`: checks/installs Node 20+ (Homebrew on
+  macOS), installs npm packages (`npm ci`), creates `config.json`, runs the
+  tests; `--ollama` also installs/starts Ollama and pulls `nomic-embed-text`
+  plus a chat model (`--model`), `--check` reports without changing anything,
+  `--yes` skips prompts. README gains a Requirements table: Node is the only
+  required software; Ollama and Homebrew are optional.
+
+### Added
 - 2026-09-19: First working version. Bundles of folders/files and websites with
   per-bundle enable/disable; indexing of text, Markdown, HTML, PDF (with OCR for
   scanned pages), Word, Excel/CSV, PowerPoint, JSON and RTF into a local SQLite

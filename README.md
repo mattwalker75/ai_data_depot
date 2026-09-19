@@ -6,15 +6,26 @@ plainly when the answer isn't in your sources. Runs on your own computer; works 
 cloud models (OpenAI and other OpenAI-compatible providers) or fully local ones (Ollama,
 LM Studio), in which case nothing leaves the machine.
 
+## Requirements
+
+| | |
+| --- | --- |
+| **Required** | Node.js 20 or newer (npm comes with it). Everything else is an npm package — no other system software; PDF text, OCR of scanned pages and Word/Excel/PowerPoint reading are all pure npm. |
+| **Optional** | [Ollama](https://ollama.com) for fully local models (nothing leaves the machine). Any OpenAI-compatible cloud provider works without it. |
+| **Optional** | Homebrew on macOS — the easiest way to install Node and Ollama. |
+| **Once** | The first scanned PDF downloads ~15 MB of English OCR data (cached in `data/tessdata`). |
+
 ## Quick start
 
 ```bash
-./DEPOT.sh start          # installs dependencies on first run, opens http://localhost:8300
-./DEPOT.sh stop | restart | status | logs
+./INSTALL_APP.sh            # checks Node, installs packages, creates config.json, runs the tests
+./INSTALL_APP.sh --ollama   # …and sets up Ollama + pulls nomic-embed-text and a chat model (--model NAME)
+./DEPOT.sh --start          # opens http://localhost:8300
 ```
 
-Requires Node.js 20+. For a fully local setup also install [Ollama](https://ollama.com) and pull a
-chat model and an embedding model, e.g. `ollama pull llama3.1` and `ollama pull nomic-embed-text`.
+`./DEPOT.sh --help` lists every flag: `-s/--start`, `-x/--stop`, `-r/--restart`, `-i/--status`,
+`-l/--logs`, `-f/--fg`, `-c/--check`, `-t/--test`. Flags run in the order given (`./DEPOT.sh -x -s`);
+bare words (`start`, `stop`, …) work too. `./INSTALL_APP.sh --help` likewise (`--check`, `--yes`).
 
 ## How it works
 
