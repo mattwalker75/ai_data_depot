@@ -92,9 +92,11 @@ function renderBundles() {
   $$("input[data-bundle]", el).forEach((cb) => cb.addEventListener("change", guard(async () => { await api(`/api/bundles/${cb.dataset.bundle}`, { method: "PATCH", body: { enabled: cb.checked } }); await refresh(); if (state.view === "sources") renderSources(); })));
 }
 function renderWelcome() {
+  // The welcome block leaves the thread after the first message; nothing to update then.
+  const hint = $("#welcome-hint"); if (!hint) return;
   const docs = state.bundles.reduce((a, b) => a + b.sources.reduce((x, s) => x + (s.doc_count || 0), 0), 0);
   const on = state.bundles.filter((b) => b.enabled).length;
-  $("#welcome-hint").textContent = state.bundles.length ? `${on} of ${state.bundles.length} bundles on · ${docs.toLocaleString()} documents indexed` : "Start by adding a bundle in Sources.";
+  hint.textContent = state.bundles.length ? `${on} of ${state.bundles.length} bundles on · ${docs.toLocaleString()} documents indexed` : "Start by adding a bundle in Sources.";
 }
 async function newBundle() {
   const v = await formDialog({ title: "New bundle", submit: "Create", fields: [

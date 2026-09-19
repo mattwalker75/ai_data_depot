@@ -5,6 +5,13 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 ## [Unreleased]
 
 ### Fixed
+- 2026-09-19: After the first chat message, any refresh of the page state
+  (adding a source, toggling a bundle) failed with "null is not an object
+  (welcome-hint)": the welcome text had left the thread but the hint updater
+  still wrote to it. Guarded. Adding a folder or website needs no model —
+  only Index does.
+
+### Fixed
 - 2026-09-19: **Indexing with no working model read every file for nothing.**
   A run over 10,722 files (OCR included) failed 10,661 of them at the very
   last step because the active provider had no API key. Indexing now makes
