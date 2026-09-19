@@ -4,6 +4,12 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 
 ## [Unreleased]
 
+### Fixed
+- 2026-09-19: The right drawer's handle vanished when that drawer was collapsed —
+  it was positioned half outside the window, leaving a 7px sliver and no way to
+  reopen the Evidence drawer. Collapsed handles now stay fully on-screen on both
+  sides, matching the left.
+
 ### Added
 - 2026-09-19: `DEPOT.sh` takes dash flags (`-s/--start`, `-x/--stop`, `-r/--restart`,
   `-i/--status`, `-l/--logs`, `-f/--fg`, `-c/--check`, `-t/--test`, `-h/--help`),

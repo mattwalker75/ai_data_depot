@@ -31,12 +31,15 @@ a{color:var(--acc-text)}
 .handle b{width:14px;height:44px;margin-top:-40px;border:1px solid var(--line);border-radius:7px;background:var(--panel);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--mute);box-shadow:var(--shadow)}
 .handle:hover b{border-color:var(--acc);color:var(--acc)}
 .handle.l{left:calc(64px + var(--lw) - 7px)} .handle.r{right:calc(var(--rw) - 7px)}
-.app.lc .handle.l{left:57px} .app.rc .handle.r{right:-7px} .app.rs .handle{transition:none}
+/* Collapsed: the handle stays fully on-screen on both sides — the left one
+   against the rail's edge, the right one flush with the window edge. */
+.app.lc .handle.l{left:57px} .app.rc .handle.r{right:0} .app.rs .handle{transition:none}
 
 /* drawers */
 .drawer{background:var(--panel);overflow:hidden;min-width:0;height:100%}
 .dl{border-right:1px solid var(--line)} .dr{border-left:1px solid var(--line)}
 .app.lc .dl,.app.rc .dr{border:none}
+.app.rc .dr{width:0}
 .dl .in{padding:14px;width:100%;min-width:220px;height:100%;overflow:auto;display:flex;flex-direction:column}
 .dr .in{width:100%;min-width:280px;height:100%;display:flex;flex-direction:column}
 .h{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--mute);font-weight:700;margin:0 0 8px}
