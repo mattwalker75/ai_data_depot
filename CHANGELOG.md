@@ -9,6 +9,9 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
   it was positioned half outside the window, leaving a 7px sliver and no way to
   reopen the Evidence drawer. Collapsed handles now stay fully on-screen on both
   sides, matching the left.
+- 2026-09-19: Clicking a handle moved the handle but did not actually hide the
+  drawer: the width is an inline CSS variable (remembered sizes), which beats
+  the class rule that zeroed it. Collapse now sets the width to 0 outright.
 
 ### Added
 - 2026-09-19: `DEPOT.sh` takes dash flags (`-s/--start`, `-x/--stop`, `-r/--restart`,

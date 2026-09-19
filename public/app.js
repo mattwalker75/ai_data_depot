@@ -28,28 +28,32 @@ mq.addEventListener("change", () => state.config && applyTheme(state.config.appe
 function wireDrawers() {
   const app = $("#app");
   const saved = store.get("drawers", {});
-  if (saved.lw) app.style.setProperty("--lw", saved.lw + "px"); if (saved.rw) app.style.setProperty("--rw", saved.rw + "px");
-  if (saved.lc) app.classList.add("lc"); if (saved.rc) app.classList.add("rc");
+  const width = { l: saved.lw || 270, r: saved.rw || 340 };
+  // The width is an inline CSS variable, so collapsing must set it to 0
+  // explicitly — a class rule cannot override an inline value.
+  const apply = (side, w) => { app.style.setProperty(side === "l" ? "--lw" : "--rw", w + "px"); app.classList.toggle(side === "l" ? "lc" : "rc", w === 0); };
+  const persist = () => store.set("drawers", { lw: width.l, rw: width.r, lc: app.classList.contains("lc"), rc: app.classList.contains("rc") });
+  apply("l", saved.lc ? 0 : width.l); apply("r", saved.rc ? 0 : width.r);
   function wire(handle, side) {
-    const cls = side === "l" ? "lc" : "rc", prop = side === "l" ? "--lw" : "--rw";
-    let last = saved[side + "w"] || (side === "l" ? 270 : 340);
+    const cls = side === "l" ? "lc" : "rc";
     const glyph = () => { const c = app.classList.contains(cls); handle.querySelector("b").textContent = side === "l" ? (c ? "›" : "‹") : (c ? "‹" : "›"); };
-    const persist = () => store.set("drawers", { ...store.get("drawers", {}), [side + "w"]: last, [side + "c"]: app.classList.contains(cls) });
     handle.addEventListener("mousedown", (e) => {
       e.preventDefault(); const startX = e.clientX; let moved = false;
-      const startW = app.classList.contains(cls) ? 0 : (parseInt(getComputedStyle(app).getPropertyValue(prop)) || last);
+      const startW = app.classList.contains(cls) ? 0 : width[side];
       app.classList.add("rs");
-      const mv = (ev) => { const dx = ev.clientX - startX; if (Math.abs(dx) > 8) moved = true; let w = side === "l" ? startW + dx : startW - dx; w = Math.max(0, Math.min(Math.round(window.innerWidth * 0.5), w));
-        if (w < 60) app.classList.add(cls); else { app.classList.remove(cls); app.style.setProperty(prop, w + "px"); last = w; } glyph(); };
+      const mv = (ev) => { const dx = ev.clientX - startX; if (Math.abs(dx) > 8) moved = true;
+        let w = side === "l" ? startW + dx : startW - dx; w = Math.max(0, Math.min(Math.round(window.innerWidth * 0.5), w));
+        if (w < 60) apply(side, 0); else { width[side] = w; apply(side, w); } glyph(); };
       const up = () => { app.classList.remove("rs"); document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up);
-        if (!moved) { if (app.classList.contains(cls)) { app.classList.remove(cls); app.style.setProperty(prop, last + "px"); } else app.classList.add(cls); glyph(); } persist(); };
+        if (!moved) { apply(side, app.classList.contains(cls) ? width[side] : 0); glyph(); } persist(); };
       document.addEventListener("mousemove", mv); document.addEventListener("mouseup", up);
     });
     glyph();
   }
   wire($("#handle-l"), "l"); wire($("#handle-r"), "r");
+  wireDrawers.open = (side) => { if (app.classList.contains(side === "l" ? "lc" : "rc")) { apply(side, width[side]); $(side === "l" ? "#handle-l b" : "#handle-r b").textContent = side === "l" ? "‹" : "›"; persist(); } };
 }
-function openRightDrawer() { const app = $("#app"); if (app.classList.contains("rc")) { app.classList.remove("rc"); const d = store.get("drawers", {}); app.style.setProperty("--rw", (d.rw || 340) + "px"); $("#handle-r b").textContent = "›"; store.set("drawers", { ...d, rc: false }); } }
+function openRightDrawer() { wireDrawers.open("r"); }
 
 // ---------------------------------------------------------------- state
 async function refresh() {
