@@ -9,6 +9,9 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
   it was positioned half outside the window, leaving a 7px sliver and no way to
   reopen the Evidence drawer. Collapsed handles now stay fully on-screen on both
   sides, matching the left.
+- 2026-09-19: The right drawer handle rendered as a full-height pale stripe with
+  no pill: its side class `r` collided with the `r` class of the citation
+  badges and inherited their styling. Handle classes renamed.
 - 2026-09-19: Clicking a handle moved the handle but did not actually hide the
   drawer: the width is an inline CSS variable (remembered sizes), which beats
   the class rule that zeroed it. Collapse now sets the width to 0 outright.
