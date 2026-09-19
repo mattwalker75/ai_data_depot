@@ -1,0 +1,427 @@
+/* AI Data Depot — UI. Vanilla JS, no build step. */
+(() => {
+"use strict";
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const state = { config: null, bundles: [], personas: [], sessions: [], session: null, view: "chat", sec: "models", streaming: null, lastCitations: [], modelsCache: {}, presets: [] };
+const store = { get(k, d) { try { const v = localStorage.getItem("depot." + k); return v == null ? d : JSON.parse(v); } catch { return d; } }, set(k, v) { try { localStorage.setItem("depot." + k, JSON.stringify(v)); } catch {} } };
+
+function toast(msg, ms = 3200) { const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => (t.hidden = true), ms); }
+async function api(path, opts = {}) {
+  const r = await fetch(path, { headers: { "content-type": "application/json" }, ...opts, body: opts.body && typeof opts.body !== "string" ? JSON.stringify(opts.body) : opts.body });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `Request failed (${r.status})`);
+  return j;
+}
+const guard = (fn) => (...a) => Promise.resolve(fn(...a)).catch((e) => toast(e.message, 5000));
+
+// ---------------------------------------------------------------- theme
+const mq = window.matchMedia("(prefers-color-scheme: dark)");
+function applyTheme(id) {
+  const t = id === "system" ? (mq.matches ? "harbor-dark" : "harbor-light") : id;
+  document.documentElement.dataset.theme = t || "harbor-light";
+}
+mq.addEventListener("change", () => state.config && applyTheme(state.config.appearance.theme));
+
+// ---------------------------------------------------------------- drawers
+function wireDrawers() {
+  const app = $("#app");
+  const saved = store.get("drawers", {});
+  if (saved.lw) app.style.setProperty("--lw", saved.lw + "px"); if (saved.rw) app.style.setProperty("--rw", saved.rw + "px");
+  if (saved.lc) app.classList.add("lc"); if (saved.rc) app.classList.add("rc");
+  function wire(handle, side) {
+    const cls = side === "l" ? "lc" : "rc", prop = side === "l" ? "--lw" : "--rw";
+    let last = saved[side + "w"] || (side === "l" ? 270 : 340);
+    const glyph = () => { const c = app.classList.contains(cls); handle.querySelector("b").textContent = side === "l" ? (c ? "›" : "‹") : (c ? "‹" : "›"); };
+    const persist = () => store.set("drawers", { ...store.get("drawers", {}), [side + "w"]: last, [side + "c"]: app.classList.contains(cls) });
+    handle.addEventListener("mousedown", (e) => {
+      e.preventDefault(); const startX = e.clientX; let moved = false;
+      const startW = app.classList.contains(cls) ? 0 : (parseInt(getComputedStyle(app).getPropertyValue(prop)) || last);
+      app.classList.add("rs");
+      const mv = (ev) => { const dx = ev.clientX - startX; if (Math.abs(dx) > 8) moved = true; let w = side === "l" ? startW + dx : startW - dx; w = Math.max(0, Math.min(Math.round(window.innerWidth * 0.5), w));
+        if (w < 60) app.classList.add(cls); else { app.classList.remove(cls); app.style.setProperty(prop, w + "px"); last = w; } glyph(); };
+      const up = () => { app.classList.remove("rs"); document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up);
+        if (!moved) { if (app.classList.contains(cls)) { app.classList.remove(cls); app.style.setProperty(prop, last + "px"); } else app.classList.add(cls); glyph(); } persist(); };
+      document.addEventListener("mousemove", mv); document.addEventListener("mouseup", up);
+    });
+    glyph();
+  }
+  wire($("#handle-l"), "l"); wire($("#handle-r"), "r");
+}
+function openRightDrawer() { const app = $("#app"); if (app.classList.contains("rc")) { app.classList.remove("rc"); const d = store.get("drawers", {}); app.style.setProperty("--rw", (d.rw || 340) + "px"); $("#handle-r b").textContent = "›"; store.set("drawers", { ...d, rc: false }); } }
+
+// ---------------------------------------------------------------- state
+async function refresh() {
+  const s = await api("/api/state");
+  Object.assign(state, { config: s.config, bundles: s.bundles, personas: s.personas, sessions: s.sessions, presets: s.presets || state.presets, meta: { version: s.version, config_path: s.config_path, data_dir: s.data_dir, sqlite_vec: s.sqlite_vec, restart_required: s.restart_required } });
+  applyTheme(state.config.appearance.theme);
+  renderBundles(); renderPersonaSelect(); renderSessionsMenu(); renderWelcome();
+  if (s.job) showJob({ status: "running", ...s.job });
+}
+function enabledBundleIds() { return state.bundles.filter((b) => b.enabled).map((b) => b.id); }
+
+// ---------------------------------------------------------------- bundles drawer
+function bundleStatus(b) {
+  if (!b.sources.length) return "none";
+  if (b.sources.some((s) => s.status === "indexing")) return "busy";
+  if (b.sources.some((s) => s.status === "error")) return "err";
+  return "ok";
+}
+function renderBundles() {
+  const el = $("#bundle-list");
+  if (!state.bundles.length) { el.innerHTML = `<div class="hint">No bundles yet. A bundle is a set of folders and websites you can switch on or off together.</div>`; return; }
+  el.innerHTML = state.bundles.map((b) => `<div class="bd ${b.enabled ? "" : "off"}"><label><input type="checkbox" data-bundle="${b.id}" ${b.enabled ? "checked" : ""}>${esc(b.name)}<span class="st ${bundleStatus(b)}" title="${bundleStatus(b)}"></span></label>
+    <small title="${esc(b.sources.map((s) => s.location).join("\n"))}">${b.sources.length ? esc(b.sources.map((s) => s.kind === "website" ? s.location.replace(/^https?:\/\//, "") : s.location.split("/").pop() || s.location).join(" · ")) : "no sources yet"}</small></div>`).join("");
+  $$("input[data-bundle]", el).forEach((cb) => cb.addEventListener("change", guard(async () => { await api(`/api/bundles/${cb.dataset.bundle}`, { method: "PATCH", body: { enabled: cb.checked } }); await refresh(); if (state.view === "sources") renderSources(); })));
+}
+function renderWelcome() {
+  const docs = state.bundles.reduce((a, b) => a + b.sources.reduce((x, s) => x + (s.doc_count || 0), 0), 0);
+  const on = state.bundles.filter((b) => b.enabled).length;
+  $("#welcome-hint").textContent = state.bundles.length ? `${on} of ${state.bundles.length} bundles on · ${docs.toLocaleString()} documents indexed` : "Start by adding a bundle in Sources.";
+}
+async function newBundle() {
+  const name = prompt("Name for the new bundle (e.g. “Federal tax code 2026” or “Client · Henderson”):");
+  if (!name || !name.trim()) return;
+  await api("/api/bundles", { method: "POST", body: { name: name.trim() } });
+  await refresh(); showView("sources"); renderSources();
+}
+
+// ---------------------------------------------------------------- privacy badge
+async function renderPrivacy() {
+  const badge = $("#priv-badge"), txt = $("#priv-text");
+  const p = state.config.models.providers[state.config.models.active];
+  txt.textContent = `${p.chat_model || "no model"} · ${p.label}`; badge.className = "priv " + (p.local ? "" : "cloud");
+  badge.title = p.local ? "Local model — nothing leaves this computer" : "Cloud model — your question and the matching passages are sent to " + p.label;
+  try { const st = await api(`/api/models/status`); if (!st.reachable) { badge.className = "priv bad"; badge.title = st.error || "Not reachable"; txt.textContent = `${p.label} — not reachable`; } else if (st.chat_model_found === false) { badge.className = "priv bad"; txt.textContent = `${p.chat_model} not found on ${p.label}`; badge.title = "Pick a model in Settings → Models"; } else { txt.textContent = `${p.chat_model} · ${p.local ? "local — nothing leaves this Mac" : p.label}`; } } catch {}
+}
+
+// ---------------------------------------------------------------- personas select
+function renderPersonaSelect() {
+  const sel = $("#persona-select"); const cur = state.session ? state.session.persona : (store.get("persona", "general"));
+  sel.innerHTML = state.personas.map((p) => `<option value="${esc(p.id)}" ${p.id === cur ? "selected" : ""}>${esc(p.name)}</option>`).join("");
+}
+
+// ---------------------------------------------------------------- markdown + citations
+function md(src) {
+  const lines = String(src).replace(/\r/g, "").split("\n");
+  let html = "", i = 0, para = [];
+  const inline = (s) => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<i>$2</i>").replace(/\[(\d{1,2})\]/g, '<button class="r" data-cite="$1">$1</button>');
+  const flush = () => { if (para.length) { html += `<p>${inline(para.join(" "))}</p>`; para = []; } };
+  while (i < lines.length) {
+    const l = lines[i];
+    if (/^```/.test(l)) { flush(); let code = []; i++; while (i < lines.length && !/^```/.test(lines[i])) code.push(lines[i++]); i++; html += `<pre>${esc(code.join("\n"))}</pre>`; continue; }
+    if (/^\s*\|.*\|\s*$/.test(l)) { flush(); const rows = []; while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) { const cells = lines[i].trim().slice(1, -1).split("|").map((c) => c.trim()); if (!cells.every((c) => /^:?-+:?$/.test(c))) rows.push(cells); i++; }
+      html += `<table>${rows.map((r, ri) => `<tr>${r.map((c) => `<${ri ? "td" : "th"}>${inline(c)}</${ri ? "td" : "th"}>`).join("")}</tr>`).join("")}</table>`; continue; }
+    if (/^#{1,4}\s/.test(l)) { flush(); const lvl = l.match(/^#+/)[0].length; html += `<h${lvl + 2}>${inline(l.replace(/^#+\s*/, ""))}</h${lvl + 2}>`; i++; continue; }
+    if (/^\s*([-*]|\d+[.)])\s+/.test(l)) { flush(); const ordered = /^\s*\d/.test(l); let items = []; while (i < lines.length && /^\s*([-*]|\d+[.)])\s+/.test(lines[i])) items.push(lines[i++].replace(/^\s*([-*]|\d+[.)])\s+/, "")); html += `<${ordered ? "ol" : "ul"}>${items.map((x) => `<li>${inline(x)}</li>`).join("")}</${ordered ? "ol" : "ul"}>`; continue; }
+    if (!l.trim()) { flush(); i++; continue; }
+    para.push(l.trim()); i++;
+  }
+  flush(); return html;
+}
+
+// ---------------------------------------------------------------- chat
+function personaName(id) { const p = state.personas.find((x) => x.id === id); return p ? p.name : id; }
+function appendUser(text) { $("#welcome") && $("#welcome").remove(); const d = document.createElement("div"); d.className = "u"; d.textContent = text; $("#thread").appendChild(d); scrollThread(); return d; }
+function appendAssistant() { const d = document.createElement("div"); d.className = "ai"; d.innerHTML = `<div class="who"><i></i>${esc(personaName(currentPersona()))}</div><div class="body cursor"></div>`; $("#thread").appendChild(d); scrollThread(); return d; }
+function scrollThread() { const t = $("#thread"); t.scrollTop = t.scrollHeight; }
+function currentPersona() { return $("#persona-select").value || "general"; }
+function ledgerHtml(l) {
+  if (!l || !state.config.chat.show_reasoning_ledger) return "";
+  const docs = l.documents.map((d) => `${esc(d.title)} <span style="color:var(--mute)">(${esc(d.bundle)})</span>`).join(", ");
+  return `<details class="steps"><summary>How I answered</summary>${l.searched.length ? `<span class="ok">Searched ${l.searched.map(esc).join(", ")} — ${l.passages} passages considered</span>` : `<span class="skip">No bundles were on</span>`}${docs ? `<span class="ok">Read ${docs}</span>` : ""}${l.skipped.length ? `<span class="skip">Skipped ${l.skipped.map(esc).join(", ")} (turned off)</span>` : ""}<span class="skip">${esc(l.persona)} · ${esc(l.model)} · ${esc(l.provider)}</span></details>`;
+}
+function finishAssistant(el, r) {
+  el.classList.toggle("nf", !!r.notFound);
+  el.querySelector(".body").classList.remove("cursor");
+  el.querySelector(".body").innerHTML = ledgerHtml(r.ledger) + md(r.text);
+  wireCitations(el, r.citations);
+}
+function wireCitations(el, citations) {
+  el.dataset.citations = JSON.stringify(citations || []);
+  $$(".r[data-cite]", el).forEach((b) => { const c = (citations || []).find((x) => x.n === Number(b.dataset.cite)); if (!c) { b.classList.add("dead"); b.title = "Not a source"; return; } b.addEventListener("click", () => { $$(".r.on").forEach((x) => x.classList.remove("on")); b.classList.add("on"); showCitation(c, citations); }); });
+}
+async function send() {
+  const ta = $("#composer"); const text = ta.value.trim(); if (!text || state.streaming) return;
+  if (!state.session) state.session = newSessionObject();
+  ta.value = ""; ta.style.height = "auto";
+  appendUser(text);
+  const el = appendAssistant();
+  const body = el.querySelector(".body");
+  const history = state.session.messages.map((m) => ({ role: m.role, content: m.content }));
+  state.session.messages.push({ role: "user", content: text, at: new Date().toISOString() });
+  const ctl = new AbortController(); state.streaming = ctl; $("#send-btn").hidden = true; $("#stop-btn").hidden = false;
+  let acc = "";
+  try {
+    const resp = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: text, history, persona: currentPersona(), bundle_ids: enabledBundleIds() }), signal: ctl.signal });
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || `Request failed (${resp.status})`);
+    const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = "", ev = null;
+    for (;;) {
+      const { value, done } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true }); let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
+        if (line.startsWith("event:")) ev = line.slice(6).trim();
+        else if (line.startsWith("data:")) { const d = JSON.parse(line.slice(5));
+          if (ev === "token") { acc += d.text; body.textContent = acc; scrollThread(); }
+          else if (ev === "done") { finishAssistant(el, d); state.lastCitations = d.citations; renderAllSources(d.citations); state.session.messages.push({ role: "assistant", content: d.text, citations: d.citations, ledger: d.ledger, at: new Date().toISOString() }); }
+          else if (ev === "error") { throw new Error(d.error); } }
+      }
+    }
+    if (state.session.messages.length === 2 && state.session.name === "New session") { state.session.name = text.slice(0, 60); $("#session-name").value = state.session.name; }
+    await autosave();
+  } catch (e) {
+    if (e.name === "AbortError") { body.classList.remove("cursor"); body.innerHTML = md(acc) + `<p class="hint">Stopped.</p>`; if (acc) state.session.messages.push({ role: "assistant", content: acc, citations: [], at: new Date().toISOString() }); }
+    else { body.classList.remove("cursor"); body.innerHTML = `<div class="err">${esc(e.message)}</div>`; state.session.messages.pop(); }
+  } finally { state.streaming = null; $("#send-btn").hidden = false; $("#stop-btn").hidden = true; scrollThread(); ta.focus(); }
+}
+
+// ---------------------------------------------------------------- evidence
+function showCitation(c, all) {
+  openRightDrawer(); switchTab("passage");
+  const ev = $("#evidence");
+  const where = [c.bundle, c.location].filter(Boolean).join(" · ");
+  ev.innerHTML = `<div class="doc"><div class="t">${esc(c.title)}</div><div class="w">${esc(c.kind === "web" ? c.locator : c.locator)}${where ? " · " + esc(where) : ""}</div><div class="pg">${esc(c.excerpt)}</div>
+    <div class="nx"><button class="btn sm" id="ev-prev">‹ Prev</button><button class="btn sm" id="ev-next">Next ›</button><button class="btn sm pri" id="ev-open">${c.kind === "web" ? "Open page" : "Open file"}</button></div></div>`;
+  const list = all || state.lastCitations; const idx = list.findIndex((x) => x.n === c.n);
+  $("#ev-prev").disabled = idx <= 0; $("#ev-next").disabled = idx < 0 || idx >= list.length - 1;
+  $("#ev-prev").onclick = () => showCitation(list[idx - 1], list); $("#ev-next").onclick = () => showCitation(list[idx + 1], list);
+  $("#ev-open").onclick = guard(async () => { if (c.kind === "web") window.open(c.locator, "_blank"); else await api("/api/open", { method: "POST", body: { locator: c.locator } }); });
+}
+function renderAllSources(citations) {
+  $("#src-count").textContent = citations && citations.length ? `(${citations.length})` : "";
+  const el = $("#evidence-all");
+  el.innerHTML = citations && citations.length ? citations.map((c) => `<div class="srow" data-n="${c.n}"><span class="n">${c.n}</span><span class="tt" title="${esc(c.locator)}">${esc(c.title)}${c.location ? " · " + esc(c.location) : ""}</span><span class="st">${c.kind === "web" ? "web" : "file"}</span></div>`).join("") : `<div class="empty">The sources the last answer cited will be listed here.</div>`;
+  $$(".srow", el).forEach((r) => r.addEventListener("click", () => showCitation(citations.find((c) => c.n === Number(r.dataset.n)), citations)));
+}
+function switchTab(tab) { $$(".dr .tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab)); $("#evidence").hidden = tab !== "passage"; $("#evidence-all").hidden = tab !== "all"; }
+
+// ---------------------------------------------------------------- sessions
+function newSessionObject() { return { id: null, name: "New session", persona: currentPersona(), messages: [], bundles: state.bundles.filter((b) => b.enabled).map((b) => b.name) }; }
+function loadSessionIntoUi(s) {
+  state.session = s; $("#session-name").value = s.name; $("#session-saved").textContent = s.id ? `saved ${fmtWhen(s.updated_at)}` : "unsaved";
+  renderPersonaSelect(); $("#persona-select").value = s.persona || "general";
+  const t = $("#thread"); t.innerHTML = "";
+  if (!s.messages.length) { t.innerHTML = `<div class="welcome" id="welcome"><h2>Ask about your sources</h2><p>Answers come only from the bundles turned on in the Reading-from drawer, with a citation for every claim.</p><p class="hint" id="welcome-hint"></p></div>`; renderWelcome(); }
+  for (const m of s.messages) { if (m.role === "user") appendUser(m.content); else { const el = appendAssistant(); finishAssistant(el, { text: m.content, citations: m.citations || [], ledger: m.ledger, notFound: false }); } }
+  const last = [...s.messages].reverse().find((m) => m.role === "assistant" && m.citations && m.citations.length); state.lastCitations = last ? last.citations : []; renderAllSources(state.lastCitations);
+  if (Array.isArray(s.bundles) && s.bundles.length) applyBundleNames(s.bundles);
+  showView("chat");
+}
+async function applyBundleNames(names) {
+  let changed = false;
+  for (const b of state.bundles) { const want = names.includes(b.name); if (want !== b.enabled) { await api(`/api/bundles/${b.id}`, { method: "PATCH", body: { enabled: want } }); changed = true; } }
+  if (changed) { await refresh(); toast("Bundles set the way this session had them."); }
+}
+async function autosave() { if (state.session && state.session.id) await saveSession(true); }
+async function saveSession(quiet) {
+  if (!state.session) state.session = newSessionObject();
+  const s = state.session; s.name = $("#session-name").value.trim() || s.name; s.persona = currentPersona(); s.bundles = state.bundles.filter((b) => b.enabled).map((b) => b.name);
+  const p = state.config.models.providers[state.config.models.active]; s.provider = state.config.models.active; s.model = p.chat_model;
+  const saved = s.id ? await api(`/api/sessions/${s.id}`, { method: "PUT", body: s }) : await api("/api/sessions", { method: "POST", body: s });
+  state.session = saved; $("#session-saved").textContent = `saved ${fmtWhen(saved.updated_at)}`;
+  state.sessions = await api("/api/sessions"); renderSessionsMenu(); if (state.view === "sessions") renderSessionsPage();
+  if (!quiet) toast(`Saved “${saved.name}”.`);
+}
+function fmtWhen(iso) { if (!iso) return ""; const d = new Date(iso), now = new Date(); const same = d.toDateString() === now.toDateString(); return same ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : d.toLocaleDateString([], { month: "short", day: "numeric" }); }
+function renderSessionsMenu() {
+  $("#sessions-recent").innerHTML = state.sessions.slice(0, 6).map((s) => `<button class="mi" data-load="${s.id}"><span class="tt">${esc(s.name)}</span><span class="when">${fmtWhen(s.updated_at)}</span></button>`).join("") || `<div class="hint" style="padding:4px 10px">No saved sessions yet.</div>`;
+  $$("[data-load]", $("#sessions-recent")).forEach((b) => b.addEventListener("click", guard(async () => { $("#sessions-menu").hidden = true; loadSessionIntoUi(await api(`/api/sessions/${b.dataset.load}`)); })));
+}
+async function renderSessionsPage() {
+  state.sessions = await api("/api/sessions");
+  const el = $("#sessions-page");
+  el.innerHTML = state.sessions.length ? `<div class="card"><table class="tbl"><tr><th>Session</th><th>Persona</th><th>Messages</th><th>Updated</th><th></th></tr>${state.sessions.map((s) => `<tr><td><b>${esc(s.name)}</b></td><td>${esc(personaName(s.persona))}</td><td>${s.message_count}</td><td>${fmtWhen(s.updated_at)}</td><td class="r"><button class="btn sm pri" data-open="${s.id}">Open</button> <a class="btn sm" href="/api/sessions/${s.id}/export?format=md" download>.md</a> <a class="btn sm" href="/api/sessions/${s.id}/export" download>.json</a> <button class="btn sm danger" data-del="${s.id}">Delete</button></td></tr>`).join("")}</table></div>` : `<div class="card"><div class="hint">No saved sessions yet. Save the current conversation from the Sessions ▾ menu in Chat.</div></div>`;
+  $$("[data-open]", el).forEach((b) => b.addEventListener("click", guard(async () => loadSessionIntoUi(await api(`/api/sessions/${b.dataset.open}`)))));
+  $$("[data-del]", el).forEach((b) => b.addEventListener("click", guard(async () => { if (!confirm("Delete this session? This cannot be undone.")) return; await api(`/api/sessions/${b.dataset.del}`, { method: "DELETE" }); if (state.session && state.session.id === b.dataset.del) { state.session = null; loadSessionIntoUi(newSessionObject()); showView("sessions"); } await renderSessionsPage(); renderSessionsMenu(); })));
+}
+async function importSessionFile(file) { const text = await file.text(); let obj; try { obj = JSON.parse(text); } catch { throw new Error("That file is not valid JSON."); } const s = await api("/api/sessions/import", { method: "POST", body: obj }); state.sessions = await api("/api/sessions"); renderSessionsMenu(); loadSessionIntoUi(s); toast(`Imported “${s.name}”.`); }
+
+// ---------------------------------------------------------------- sources page
+function srcMeta(s) {
+  if (s.status === "indexing") return `<span class="pill busy">indexing</span>`;
+  if (s.status === "error") return `<span class="pill err" title="${esc(s.last_error || "")}">error</span>`;
+  if (s.status === "pending") return `<span class="pill">not indexed</span>`;
+  return `<span class="pill ok">${s.doc_count} ${s.kind === "website" ? "pages" : "files"}</span> ${s.last_indexed_at ? `<span class="meta">${fmtWhen(s.last_indexed_at)}</span>` : ""}${s.last_error ? ` <span class="meta err" title="${esc(s.last_error)}">⚠</span>` : ""}`;
+}
+function renderSources() {
+  const el = $("#sources-page");
+  if (!state.bundles.length) { el.innerHTML = `<div class="card"><div class="ct">No bundles yet</div><p class="hint">A bundle groups folders and websites you switch on or off together — “Federal tax code”, “Client · Henderson”. Create one, then add a folder or a website to it.</p><button class="btn pri" id="nb-inline">+ New bundle</button></div>`; $("#nb-inline").addEventListener("click", guard(newBundle)); return; }
+  el.innerHTML = state.bundles.map((b) => `<div class="card" data-bundle="${b.id}">
+    <div class="ct"><button class="toggle ${b.enabled ? "on" : ""}" data-toggle="${b.id}" title="${b.enabled ? "On — the assistant may read this bundle" : "Off"}" aria-label="Enable bundle"></button><input class="session-name" data-rename="${b.id}" value="${esc(b.name)}" aria-label="Bundle name"><span class="sp"></span>
+      <button class="btn sm" data-addpath="${b.id}">+ Folder or file</button><button class="btn sm" data-addweb="${b.id}">+ Website</button><button class="btn sm" data-docs="${b.id}">Documents</button><button class="btn sm danger" data-delbundle="${b.id}">Delete</button></div>
+    ${b.sources.length ? b.sources.map((s) => `<div class="srcline"><span class="k">${s.kind === "website" ? "website" : "folder"}</span><span class="loc" title="${esc(s.location)}">${esc(s.location)}</span>${srcMeta(s)}<button class="btn sm" data-reindex="${s.id}">${s.kind === "website" ? "Re-check" : "Re-index"}</button><button class="btn sm danger" data-delsrc="${s.id}">Remove</button></div>`).join("") : `<div class="hint">No sources yet — add a folder, a file, or a website.</div>`}
+    <div class="docs" id="docs-${b.id}" hidden></div></div>`).join("");
+  $$("[data-toggle]", el).forEach((t) => t.addEventListener("click", guard(async () => { await api(`/api/bundles/${t.dataset.toggle}`, { method: "PATCH", body: { enabled: !t.classList.contains("on") } }); await refresh(); renderSources(); })));
+  $$("[data-rename]", el).forEach((i) => i.addEventListener("change", guard(async () => { await api(`/api/bundles/${i.dataset.rename}`, { method: "PATCH", body: { name: i.value } }); await refresh(); })));
+  $$("[data-addpath]", el).forEach((b) => b.addEventListener("click", guard(async () => { const p = await browse(); if (!p) return; await api(`/api/bundles/${b.dataset.addpath}/sources`, { method: "POST", body: { kind: "path", location: p } }); toast("Added — indexing has started."); await refresh(); renderSources(); })));
+  $$("[data-addweb]", el).forEach((b) => b.addEventListener("click", guard(async () => { const u = prompt("Website address. Everything under it is in scope — e.g. https://www.irs.gov/privacy-disclosure also covers /privacy-disclosure/tax-code-regulations-and-official-guidance:"); if (!u) return; await api(`/api/bundles/${b.dataset.addweb}/sources`, { method: "POST", body: { kind: "website", location: u.trim() } }); toast("Added — the site is being read now."); await refresh(); renderSources(); })));
+  $$("[data-reindex]", el).forEach((b) => b.addEventListener("click", guard(async () => { await api(`/api/sources/${b.dataset.reindex}/index`, { method: "POST" }); toast("Queued."); })));
+  $$("[data-delsrc]", el).forEach((b) => b.addEventListener("click", guard(async () => { if (!confirm("Remove this source and everything indexed from it?")) return; await api(`/api/sources/${b.dataset.delsrc}`, { method: "DELETE" }); await refresh(); renderSources(); })));
+  $$("[data-delbundle]", el).forEach((b) => b.addEventListener("click", guard(async () => { if (!confirm("Delete this bundle, its sources and everything indexed from them?")) return; await api(`/api/bundles/${b.dataset.delbundle}`, { method: "DELETE" }); await refresh(); renderSources(); })));
+  $$("[data-docs]", el).forEach((b) => b.addEventListener("click", guard(async () => { const box = $(`#docs-${b.dataset.docs}`); if (!box.hidden) { box.hidden = true; return; } const docs = await api(`/api/bundles/${b.dataset.docs}/documents`); box.hidden = false;
+    box.innerHTML = docs.length ? `<table class="tbl" style="margin-top:10px"><tr><th>Document</th><th>Where</th><th>Pages</th><th>Status</th></tr>${docs.map((d) => `<tr><td>${esc(d.title || d.locator)}${d.ocr_pages ? ` <span class="pill" title="pages read with OCR">OCR ${d.ocr_pages}</span>` : ""}</td><td class="loc" style="font-family:var(--mono);font-size:11.5px;max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(d.locator)}">${esc(d.locator)}</td><td class="r">${d.page_count || ""}</td><td>${d.status === "ok" ? `<span class="pill ok">indexed</span>` : `<span class="pill err" title="${esc(d.error || "")}">${esc(d.error || "error")}</span>`}</td></tr>`).join("")}</table>` : `<div class="hint" style="margin-top:8px">Nothing indexed yet.</div>`; })));
+}
+// folder browser
+function browse() {
+  return new Promise((resolve) => {
+    const dlg = $("#browse-dialog"); let cur = store.get("browsePath", null), selected = null;
+    async function go(p) { const r = await api("/api/fs/browse", { method: "POST", body: { path: p } }); cur = r.path; selected = null; $("#browse-path").textContent = r.path; $("#browse-choose").textContent = "Use this folder"; $("#browse-up").onclick = () => go(r.parent);
+      $("#browse-list").innerHTML = r.entries.map((e) => `<button type="button" data-name="${esc(e.name)}" data-dir="${e.dir ? 1 : 0}"><span class="ico">${e.dir ? "▸" : "·"}</span>${esc(e.name)}</button>`).join("") || `<div class="hint" style="padding:10px">Nothing here that can be indexed.</div>`;
+      $$("button[data-name]", $("#browse-list")).forEach((b) => { b.addEventListener("dblclick", () => { if (b.dataset.dir === "1") go(cur + "/" + b.dataset.name); }); b.addEventListener("click", () => { $$("button.on", $("#browse-list")).forEach((x) => x.classList.remove("on")); b.classList.add("on"); selected = b.dataset.name; $("#browse-choose").textContent = b.dataset.dir === "1" ? `Use “${b.dataset.name}”` : `Use this file`; }); }); }
+    $("#browse-choose").onclick = () => { const p = selected ? cur + "/" + selected : cur; store.set("browsePath", cur); dlg.close(); resolve(p); };
+    $("#browse-cancel").onclick = () => { dlg.close(); resolve(null); };
+    dlg.addEventListener("close", () => resolve(null), { once: true });
+    go(cur).then(() => dlg.showModal()).catch((e) => { toast(e.message); resolve(null); });
+  });
+}
+// index progress (SSE)
+function showJob(j) {
+  const strip = $("#idx-strip");
+  if (!j || j.status === "done" || j.status === "failed" || j.status === "stopped") { strip.hidden = true; if (j) { toast(j.status === "failed" ? `Indexing failed: ${j.error}` : `${j.target}: ${j.message || j.status}`, 5000); } refresh().then(() => state.view === "sources" && renderSources()).catch(() => {}); return; }
+  strip.hidden = false; const pct = j.total ? Math.round((j.done / j.total) * 100) : 0; $("#idx-fill").style.width = pct + "%"; $("#idx-msg").textContent = `${j.kind === "website" ? "Reading" : "Indexing"} ${j.target}${j.total ? ` — ${j.done}/${j.total}` : ""}${j.message ? " · " + j.message : ""}`;
+}
+function wireIndexEvents() { const es = new EventSource("/api/index/events"); es.addEventListener("job", (e) => showJob(JSON.parse(e.data))); es.onerror = () => {}; }
+
+// ---------------------------------------------------------------- personas page
+let editing = null;
+function renderPersonas() {
+  const cur = currentPersona();
+  $("#persona-list").innerHTML = `<div class="plist">${state.personas.map((p) => `<div class="card pcard ${p.id === cur ? "on" : ""}" data-pid="${esc(p.id)}"><div class="ct">${esc(p.name)}<span class="tag">${p.builtin ? "built-in" : "yours"}</span></div><div class="d">${esc(p.description)}</div></div>`).join("")}</div>`;
+  $$("[data-pid]").forEach((c) => c.addEventListener("click", () => editPersona(state.personas.find((p) => p.id === c.dataset.pid))));
+  if (editing) editPersona(state.personas.find((p) => p.id === editing.id) || editing); else $("#persona-editor").hidden = true;
+}
+function editPersona(p, fresh) {
+  editing = p; const ed = $("#persona-editor"); ed.hidden = false;
+  ed.innerHTML = `<div class="ct">${fresh ? "New persona" : esc(p.name)}<span class="sp"></span>${!fresh && p.id === currentPersona() ? `<span class="pill ok">in use</span>` : `<button class="btn sm" id="pe-use">Use in chat</button>`}</div>
+    <div class="row"><label>Name</label><input class="fld" id="pe-name" value="${esc(p.name)}" ${p.builtin && !fresh ? "readonly" : ""}></div>
+    <div class="row"><label>One line</label><input class="fld" id="pe-desc" value="${esc(p.description)}" ${p.builtin && !fresh ? "readonly" : ""}></div>
+    <div class="row wide"><label>Instructions — how it should answer. The source rules (answer only from sources, cite everything, say when it isn't there) always apply on top.</label><textarea class="fld" id="pe-prompt" ${p.builtin && !fresh ? "readonly" : ""}>${esc(p.prompt)}</textarea></div>
+    <div class="row wide" style="display:flex;gap:8px">${p.builtin && !fresh ? `<button class="btn pri" id="pe-copy">Save a copy I can edit</button>` : `<button class="btn pri" id="pe-save">Save</button>${fresh ? "" : `<button class="btn danger" id="pe-del">Delete</button>`}`}</div>`;
+  const val = () => ({ name: $("#pe-name").value, description: $("#pe-desc").value, prompt: $("#pe-prompt").value });
+  $("#pe-use") && $("#pe-use").addEventListener("click", () => { $("#persona-select").value = p.id; store.set("persona", p.id); if (state.session) state.session.persona = p.id; renderPersonas(); toast(`Chat will answer as ${p.name}.`); });
+  $("#pe-save") && $("#pe-save").addEventListener("click", guard(async () => { const saved = await api("/api/personas", { method: "POST", body: { ...(fresh ? {} : { id: p.id }), ...val() } }); editing = saved; await refresh(); renderPersonas(); toast("Persona saved."); }));
+  $("#pe-copy") && $("#pe-copy").addEventListener("click", guard(async () => { const v = val(); const saved = await api("/api/personas", { method: "POST", body: { ...v, name: v.name + " (mine)" } }); editing = saved; await refresh(); renderPersonas(); toast("Copy saved — edit away."); }));
+  $("#pe-del") && $("#pe-del").addEventListener("click", guard(async () => { if (!confirm(`Delete “${p.name}”?`)) return; await api(`/api/personas/${p.id}`, { method: "DELETE" }); editing = null; await refresh(); renderPersonas(); }));
+}
+
+// ---------------------------------------------------------------- settings
+const SEC_TITLES = { models: ["Models", "The chat model answers; the embedding model builds the index. Both come from the provider you choose."], appearance: ["Appearance", "Applies immediately."], files: ["Indexing · Files", "Folders and files in your bundles."], websites: ["Indexing · Websites", "Websites in your bundles are read within their scope and re-checked on a schedule."], general: ["General", "Where the tool listens and keeps its data."], about: ["About", ""] };
+async function renderSettings() {
+  const cfg = (await api("/api/settings"));
+  state.config = cfg.config; state.presets = cfg.presets; state.meta.restart_required = cfg.restart_required;
+  const pane = $("#spane"); const [title, sub] = SEC_TITLES[state.sec];
+  let html = `<h3>${title}</h3>${sub ? `<div class="sub">${sub}</div>` : ""}`;
+  if (state.meta.restart_required && state.meta.restart_required.length) html += `<div class="warn">⚠ Restart AI Data Depot for ${state.meta.restart_required.join(", ")} to take effect (./DEPOT.sh restart).</div>`;
+  const m = state.config.models, ix = state.config.indexing, sv = state.config.server;
+  if (state.sec === "models") {
+    const p = m.providers[m.active];
+    html += `<div class="card"><div class="ct">Provider</div><div class="prov">${Object.entries(m.providers).map(([k, v]) => `<button data-prov="${k}" class="${k === m.active ? "on" : ""}">${esc(v.label)}</button>`).join("")}</div>
+      <div class="row" style="margin-top:10px"><label>Server / base URL</label><input class="fld mono" id="m-url" value="${esc(p.base_url)}"></div>
+      <div class="row"><label>API key</label><input class="fld mono" id="m-key" type="password" value="${esc(p.api_key)}" placeholder="${p.local ? "not needed for a local server" : "paste your key"}"></div>
+      <div class="row"><label>Chat model</label><span style="display:flex;gap:6px;max-width:520px"><input class="fld mono" id="m-chat" list="m-list" value="${esc(p.chat_model)}"><button class="btn sm" id="m-refresh" title="Ask the provider which models it offers">List models</button></span><datalist id="m-list"></datalist></div>
+      <div class="row"><label>Embedding model</label><input class="fld mono" id="m-emb" list="m-list" value="${esc(p.embedding_model)}" placeholder="${p.local ? "e.g. nomic-embed-text (ollama pull nomic-embed-text)" : "e.g. text-embedding-3-small"}"></div>
+      <div class="row"><label>Status</label><span class="status wait" id="m-status">Checking…</span></div>
+      <div class="row wide" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri" id="m-save">Save</button><button class="btn" id="m-test">Test connection</button><span class="hint" style="align-self:center">${p.local ? "Local: your documents and questions never leave this computer." : "Cloud: questions and the matching passages are sent to " + esc(p.label) + "."}</span></div></div>
+      <div class="card"><div class="ct">Answering</div>
+      <div class="row"><label>Passages per answer</label><input class="fld" id="m-chunks" type="number" min="3" max="40" value="${m.context_chunks}"></div>
+      <div class="row"><label>Temperature</label><input class="fld" id="m-temp" type="number" min="0" max="1" step="0.1" value="${m.temperature}"></div>
+      <div class="row"><label>Max answer length (tokens)</label><input class="fld" id="m-max" type="number" min="200" max="16000" value="${m.max_tokens}"></div>
+      <div class="row"><label>Show “How I answered”</label><span class="chk"><input type="checkbox" id="m-ledger" ${state.config.chat.show_reasoning_ledger ? "checked" : ""}><span class="hint">under every answer</span></span></div>
+      <div class="row"><label>“Not found” phrase</label><input class="fld" id="m-nf" value="${esc(state.config.chat.not_found_phrase)}"></div>
+      <div class="row wide"><button class="btn pri" id="m-save2">Save</button></div></div>`;
+  } else if (state.sec === "appearance") {
+    const sw = { "harbor-light": "linear-gradient(#f3f6f8 55%,#0f1b26 55%)", "harbor-dark": "linear-gradient(#0f1418 55%,#161c22 55%)", "reading-room": "linear-gradient(#f7f3ec 55%,#7a2e1f 55%)", ledger: "linear-gradient(#fafbf9 55%,#2f6b3a 55%)", graphite: "linear-gradient(#141416 55%,#d9b45c 55%)", system: "linear-gradient(90deg,#f3f6f8 50%,#0f1418 50%)" };
+    html += `<div class="card"><div class="ct">Theme</div><div class="sw">${state.presets.map((t) => `<button data-theme="${t.id}" class="${state.config.appearance.theme === t.id ? "on" : ""}"><i style="background:${sw[t.id] || "#888"}"></i>${esc(t.name)}</button>`).join("")}</div><p class="hint" style="margin:10px 0 0">Presets are token sets in public/style.css; a custom theme is one more block there.</p></div>`;
+  } else if (state.sec === "files") {
+    const f = ix.files; const srcs = state.bundles.flatMap((b) => b.sources.filter((s) => s.kind === "path").map((s) => ({ ...s, bundle: b.name })));
+    html += `<div class="card"><div class="ct">Files <span class="sp"></span><button class="btn" id="ix-files">Re-index all files</button><button class="btn" id="ix-stop">Stop</button></div>
+      <div class="prog" style="margin-bottom:8px"><i id="ix-files-fill"></i></div>
+      <table class="tbl"><tr><th>Bundle</th><th>Folder / file</th><th>Status</th></tr>${srcs.map((s) => `<tr><td>${esc(s.bundle)}</td><td style="font-family:var(--mono);font-size:12px">${esc(s.location)}</td><td>${srcMeta(s)} <button class="btn sm" data-reindex="${s.id}">Re-index</button></td></tr>`).join("") || `<tr><td colspan="3" class="hint">No folders yet — add one in Sources.</td></tr>`}</table></div>
+      <div class="card"><div class="ct">Options</div>
+      <div class="row"><label>Watch folders</label><span class="chk"><input type="checkbox" id="f-watch" ${f.watch ? "checked" : ""}><span class="hint">index new and changed files as they appear</span></span></div>
+      <div class="row"><label>Read scanned PDFs (OCR)</label><span class="chk"><input type="checkbox" id="f-ocr" ${f.ocr ? "checked" : ""}><span class="hint">pages with almost no text are read as images; the first time downloads the English OCR data (~15 MB)</span></span></div>
+      <div class="row"><label>OCR when a page has fewer than</label><input class="fld" id="f-ocrmin" type="number" min="0" value="${f.ocr_min_chars_per_page}"> </div>
+      <div class="row"><label>Skip files larger than (MB)</label><input class="fld" id="f-max" type="number" min="1" value="${f.max_file_mb}"></div>
+      <div class="row"><label>Passage size (characters)</label><input class="fld" id="f-chunk" type="number" min="500" max="8000" value="${f.chunk_chars}"></div>
+      <div class="row"><label>File types</label><input class="fld mono" id="f-ext" value="${esc(f.extensions.join(" "))}"></div>
+      <div class="row wide"><button class="btn pri" id="f-save">Save</button></div></div>`;
+  } else if (state.sec === "websites") {
+    const w = ix.websites; const srcs = state.bundles.flatMap((b) => b.sources.filter((s) => s.kind === "website").map((s) => ({ ...s, bundle: b.name })));
+    html += `<div class="card"><div class="ct">Websites <span class="sp"></span><button class="btn" id="ix-web">Re-check all websites</button><button class="btn" id="ix-stop2">Stop</button></div>
+      <table class="tbl"><tr><th>Bundle</th><th>Website (everything under it)</th><th>Status</th></tr>${srcs.map((s) => `<tr><td>${esc(s.bundle)}</td><td style="font-family:var(--mono);font-size:12px">${esc(s.location)}</td><td>${srcMeta(s)} <button class="btn sm" data-reindex="${s.id}">Re-check</button></td></tr>`).join("") || `<tr><td colspan="3" class="hint">No websites yet — add one in Sources.</td></tr>`}</table></div>
+      <div class="card"><div class="ct">Options</div>
+      <div class="row"><label>Pages per website</label><input class="fld" id="w-cap" type="number" min="1" max="20000" value="${w.max_pages_per_site}"></div>
+      <div class="row"><label>Link depth</label><input class="fld" id="w-depth" type="number" min="0" max="20" value="${w.max_depth}"></div>
+      <div class="row"><label>Re-check every (hours)</label><input class="fld" id="w-hours" type="number" min="0" value="${w.recheck_hours}"> </div>
+      <div class="row"><label>Pause between pages (ms)</label><input class="fld" id="w-delay" type="number" min="0" value="${w.delay_ms}"></div>
+      <div class="row"><label>Respect robots.txt</label><span class="chk"><input type="checkbox" id="w-robots" ${w.respect_robots ? "checked" : ""}></span></div>
+      <div class="row wide"><button class="btn pri" id="w-save">Save</button></div></div>`;
+  } else if (state.sec === "general") {
+    html += `<div class="card"><div class="ct">Server</div>
+      <div class="row"><label>Port</label><input class="fld" id="g-port" type="number" min="1" max="65535" value="${sv.port}"></div>
+      <div class="row"><label>Listen on</label><select class="fld" id="g-host"><option value="127.0.0.1" ${sv.host === "127.0.0.1" ? "selected" : ""}>This computer only (127.0.0.1)</option><option value="0.0.0.0" ${sv.host === "0.0.0.0" ? "selected" : ""}>Any device on the network (0.0.0.0)</option></select></div>
+      <div class="row"><label>Open the browser on start</label><span class="chk"><input type="checkbox" id="g-open" ${sv.open_browser ? "checked" : ""}></span></div>
+      <div class="row"><label>Data folder</label><input class="fld mono" id="g-data" value="${esc(state.config.data_dir)}"></div>
+      <div class="row"><label>Config file</label><span class="fld mono" style="border:none;padding-left:0">${esc(state.meta.config_path)}</span></div>
+      <div class="warn">⚠ Port, listen address and data folder take effect after you restart AI Data Depot.</div>
+      <div class="row wide" style="display:flex;gap:8px"><button class="btn pri" id="g-save">Save</button><button class="btn" id="g-reload" title="If you edited config.json in a text editor">Reload config.json</button></div></div>`;
+  } else {
+    html += `<div class="card"><div class="ct">AI Data Depot ${esc(state.meta.version)}</div><p>A local reference assistant. It answers only from the folders and websites you enable, cites every claim, and says when the answer isn't in your sources.</p>
+      <table class="tbl"><tr><td>Config</td><td style="font-family:var(--mono);font-size:12px">${esc(state.meta.config_path)}</td></tr><tr><td>Data</td><td style="font-family:var(--mono);font-size:12px">${esc(state.meta.data_dir)}</td></tr><tr><td>Vector search</td><td>${state.meta.sqlite_vec ? "sqlite-vec (native)" : "in-process fallback"}</td></tr></table></div>`;
+  }
+  pane.innerHTML = html;
+  // wiring
+  $$("[data-prov]", pane).forEach((b) => b.addEventListener("click", guard(async () => { await api("/api/settings", { method: "PUT", body: { models: { active: b.dataset.prov } } }); await renderSettings(); renderPrivacy(); })));
+  const saveModels = guard(async () => { const k = m.active; await api("/api/settings", { method: "PUT", body: { models: { active: k, providers: { [k]: { base_url: $("#m-url").value.trim(), api_key: $("#m-key").value, chat_model: $("#m-chat").value.trim(), embedding_model: $("#m-emb").value.trim() } }, context_chunks: Number($("#m-chunks").value), temperature: Number($("#m-temp").value), max_tokens: Number($("#m-max").value) }, chat: { show_reasoning_ledger: $("#m-ledger").checked, not_found_phrase: $("#m-nf").value.trim() || "Not in your sources" } } }); toast("Saved."); await renderSettings(); renderPrivacy(); });
+  $("#m-save") && ($("#m-save").onclick = saveModels); $("#m-save2") && ($("#m-save2").onclick = saveModels);
+  $("#m-test") && ($("#m-test").onclick = guard(async () => { await saveModels(); }));
+  $("#m-refresh") && ($("#m-refresh").onclick = guard(async () => { const r = await api(`/api/models/list`); $("#m-list").innerHTML = r.models.map((x) => `<option value="${esc(x)}">`).join(""); toast(`${r.models.length} models listed — pick from the field's dropdown.`); }));
+  if ($("#m-status")) { api("/api/models/status").then((st) => { const el = $("#m-status"); if (!st.reachable) { el.className = "status bad"; el.textContent = `Not reachable — ${st.error}`; return; } const parts = [`Connected${st.models.length ? ` — ${st.models.length} models available` : ""}`]; if (st.chat_model_found === false) parts.push(`chat model “${st.chat_model}” not found`); if (st.embedding_model_found === false) parts.push(`embedding model “${st.embedding_model}” not found`); if (!st.embedding_model) parts.push("no embedding model set — indexing will use the fallback provider"); el.className = "status " + (parts.length > 1 ? "bad" : "ok"); el.textContent = parts.join(" · "); }).catch((e) => { $("#m-status").className = "status bad"; $("#m-status").textContent = e.message; }); }
+  $$("[data-theme]", pane).forEach((b) => b.addEventListener("click", guard(async () => { await api("/api/settings", { method: "PUT", body: { appearance: { theme: b.dataset.theme } } }); state.config.appearance.theme = b.dataset.theme; applyTheme(b.dataset.theme); await renderSettings(); })));
+  $("#f-save") && ($("#f-save").onclick = guard(async () => { await api("/api/settings", { method: "PUT", body: { indexing: { files: { watch: $("#f-watch").checked, ocr: $("#f-ocr").checked, ocr_min_chars_per_page: Number($("#f-ocrmin").value), max_file_mb: Number($("#f-max").value), chunk_chars: Number($("#f-chunk").value), extensions: $("#f-ext").value.split(/[\s,]+/).filter(Boolean).map((e) => (e.startsWith(".") ? e : "." + e).toLowerCase()) } } } }); toast("Saved."); await renderSettings(); }));
+  $("#w-save") && ($("#w-save").onclick = guard(async () => { await api("/api/settings", { method: "PUT", body: { indexing: { websites: { max_pages_per_site: Number($("#w-cap").value), max_depth: Number($("#w-depth").value), recheck_hours: Number($("#w-hours").value), delay_ms: Number($("#w-delay").value), respect_robots: $("#w-robots").checked } } } }); toast("Saved."); await renderSettings(); }));
+  $("#g-save") && ($("#g-save").onclick = guard(async () => { const r = await api("/api/settings", { method: "PUT", body: { server: { port: Number($("#g-port").value), host: $("#g-host").value, open_browser: $("#g-open").checked }, data_dir: $("#g-data").value.trim() } }); toast(r.changed_now.length ? "Saved — restart to apply " + r.changed_now.join(", ") : "Saved."); await renderSettings(); }));
+  $("#g-reload") && ($("#g-reload").onclick = guard(async () => { await api("/api/settings/reload", { method: "POST" }); await refresh(); await renderSettings(); toast("config.json reloaded."); }));
+  $("#ix-files") && ($("#ix-files").onclick = guard(async () => { await api("/api/index/files", { method: "POST", body: {} }); toast("Re-indexing files."); }));
+  $("#ix-web") && ($("#ix-web").onclick = guard(async () => { await api("/api/index/websites", { method: "POST", body: {} }); toast("Re-checking websites."); }));
+  $$("#ix-stop, #ix-stop2").forEach((b) => (b.onclick = guard(async () => { await api("/api/index/stop", { method: "POST" }); toast("Stopping after the current item."); })));
+  $$("[data-reindex]", pane).forEach((b) => (b.onclick = guard(async () => { await api(`/api/sources/${b.dataset.reindex}/index`, { method: "POST" }); toast("Queued."); })));
+}
+
+// ---------------------------------------------------------------- views
+function showView(v) {
+  state.view = v; $$(".rail .nav").forEach((b) => b.classList.toggle("on", b.dataset.view === v)); $$(".view").forEach((s) => s.classList.toggle("on", s.id === "view-" + v));
+  if (v === "sources") renderSources(); if (v === "personas") renderPersonas(); if (v === "sessions") renderSessionsPage().catch((e) => toast(e.message)); if (v === "settings") renderSettings().catch((e) => toast(e.message));
+}
+
+// ---------------------------------------------------------------- boot
+document.addEventListener("DOMContentLoaded", async () => {
+  wireDrawers();
+  $$(".rail .nav").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
+  $$(".dr .tabs button").forEach((b) => b.addEventListener("click", () => switchTab(b.dataset.tab)));
+  $("#send-btn").addEventListener("click", guard(send)); $("#stop-btn").addEventListener("click", () => state.streaming && state.streaming.abort());
+  const ta = $("#composer"); ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); guard(send)(); } }); ta.addEventListener("input", () => { ta.style.height = "auto"; ta.style.height = Math.min(180, ta.scrollHeight) + "px"; });
+  $("#persona-select").addEventListener("change", () => { store.set("persona", currentPersona()); if (state.session) state.session.persona = currentPersona(); });
+  $("#session-name").addEventListener("change", () => { if (state.session) state.session.name = $("#session-name").value; });
+  $("#save-btn").addEventListener("click", guard(() => saveSession(false)));
+  $("#sessions-btn").addEventListener("click", () => { const m = $("#sessions-menu"); m.hidden = !m.hidden; });
+  document.addEventListener("click", (e) => { if (!e.target.closest(".menu-wrap")) $("#sessions-menu").hidden = true; });
+  $$("#sessions-menu .mi[data-act]").forEach((b) => b.addEventListener("click", guard(async () => { $("#sessions-menu").hidden = true; const act = b.dataset.act;
+    if (act === "save") await saveSession(false); else if (act === "new") loadSessionIntoUi(newSessionObject()); else if (act === "all") showView("sessions");
+    else if (act === "import") $("#import-file").click();
+    else if (act.startsWith("export")) { if (!state.session || !state.session.id) await saveSession(true); window.location.href = `/api/sessions/${state.session.id}/export${act === "export-md" ? "?format=md" : ""}`; } })));
+  $("#import-file").addEventListener("change", guard(async (e) => { if (e.target.files[0]) await importSessionFile(e.target.files[0]); e.target.value = ""; }));
+  $("#new-session-btn").addEventListener("click", () => loadSessionIntoUi(newSessionObject()));
+  $$("#new-bundle-btn, #new-bundle-btn2").forEach((b) => b.addEventListener("click", guard(newBundle)));
+  $("#index-files-btn").addEventListener("click", guard(async () => { await api("/api/index/files", { method: "POST", body: {} }); toast("Re-indexing files."); }));
+  $("#index-web-btn").addEventListener("click", guard(async () => { await api("/api/index/websites", { method: "POST", body: {} }); toast("Re-checking websites."); }));
+  $("#new-persona-btn").addEventListener("click", () => editPersona({ id: null, name: "", description: "", prompt: "", builtin: false }, true));
+  $$("#smenu button").forEach((b) => b.addEventListener("click", () => { state.sec = b.dataset.sec; $$("#smenu button").forEach((x) => x.classList.toggle("on", x === b)); renderSettings().catch((e) => toast(e.message)); }));
+  try { await refresh(); } catch (e) { toast("Could not reach the server: " + e.message, 8000); return; }
+  state.session = newSessionObject(); renderPersonaSelect(); $("#persona-select").value = store.get("persona", "general");
+  renderPrivacy(); wireIndexEvents();
+  if (!state.bundles.length) showView("sources");
+});
+})();

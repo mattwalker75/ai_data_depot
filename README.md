@@ -1,1 +1,63 @@
-# ai_data_depot
+# AI Data Depot
+
+A local reference assistant for non-technical professionals. It answers questions
+**only from the document folders and websites you enable**, cites every claim, and says
+plainly when the answer isn't in your sources. Runs on your own computer; works with
+cloud models (OpenAI and other OpenAI-compatible providers) or fully local ones (Ollama,
+LM Studio), in which case nothing leaves the machine.
+
+## Quick start
+
+```bash
+./DEPOT.sh start          # installs dependencies on first run, opens http://localhost:8300
+./DEPOT.sh stop | restart | status | logs
+```
+
+Requires Node.js 20+. For a fully local setup also install [Ollama](https://ollama.com) and pull a
+chat model and an embedding model, e.g. `ollama pull llama3.1` and `ollama pull nomic-embed-text`.
+
+## How it works
+
+1. **Bundles** — group folders/files and websites into named bundles ("Federal tax code 2026",
+   "Client · Henderson"). Each bundle is a checkbox: on, the assistant may read it; off, it may not.
+2. **Indexing** — files (text, Markdown, HTML, PDF incl. scanned pages via OCR, Word, Excel, CSV,
+   PowerPoint, JSON, RTF) and websites are split into passages and indexed (vector + keyword) in a
+   local SQLite database. Folders are watched for new files; websites are re-checked on a schedule.
+   A website source covers **everything under its address**: `https://www.irs.gov/privacy-disclosure`
+   includes `/privacy-disclosure/tax-code-regulations-and-official-guidance`. Nothing outside that
+   scope is ever fetched — this is deliberately not a search engine.
+3. **Ask** — the best passages from the enabled bundles are handed to the model, which must cite them
+   as `[1]`, `[2]`… Click a citation to see the exact passage in the Evidence drawer and open the
+   file or page. "How I answered" under each reply lists what was searched, read and skipped.
+4. **Personas** set voice and focus (Tax Specialist, Researcher, Legal, …); you can add your own. The
+   source rules always apply on top.
+5. **Sessions** are saved conversations — one per customer or matter. Save, load, export (`.json` to
+   move between machines, `.md` to read), import.
+
+## Configuration
+
+Everything lives in `config.json` (created from `config.template.json` on first run). Edit it in a
+text editor or in **Settings** — both write the same file. Port, listen address and data folder
+take effect after a restart; the app tells you. API keys are stored in `config.json` (gitignored)
+and shown masked in the UI.
+
+| Section | What |
+| --- | --- |
+| `models` | Active provider; per-provider base URL, API key, chat model, embedding model. The embedding model follows the active provider; `embeddings.fallback_provider` covers providers without one (Anthropic). |
+| `indexing.files` | Watch folders, OCR, size limit, passage size, file types. |
+| `indexing.websites` | Pages per site (500), link depth, re-check interval, pause between pages, robots.txt. |
+| `appearance.theme` | `harbor-light`, `harbor-dark`, `reading-room`, `ledger`, `graphite`, `system`. |
+| `server` | `port` (8300), `host`, open the browser on start. |
+
+## Layout
+
+```
+server.js        Express app + JSON/SSE API           public/        UI (no build step)
+src/config.js    config.json load/merge/mask          src/extract.js file → text (PDF/OCR/Office)
+src/db.js        SQLite schema, sqlite-vec            src/crawler.js scoped website crawler
+src/indexer.js   jobs, watching, re-checks            src/retrieval.js hybrid vector + keyword search
+src/chat.js      grounded answer + citations          src/personas.js src/sessions.js
+data/            depot.sqlite, sessions/, personas.json, tessdata/   (gitignored)
+```
+
+Tests: `npm test`.

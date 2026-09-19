@@ -1,0 +1,29 @@
+{
+  "name": "ai-data-depot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI Data Depot — a local reference assistant that answers only from the document folders and websites you enable, with citations.",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "@napi-rs/canvas": "^0.1.60",
+    "better-sqlite3": "^11.6.0",
+    "cheerio": "^1.0.0",
+    "chokidar": "^4.0.3",
+    "express": "^4.21.2",
+    "jsdom": "^25.0.1",
+    "jszip": "^3.10.1",
+    "mammoth": "^1.8.0",
+    "pdfjs-dist": "^4.10.38",
+    "robots-parser": "^3.0.1",
+    "sqlite-vec": "^0.1.6",
+    "tesseract.js": "^5.1.1",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  }
+}

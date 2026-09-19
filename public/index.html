@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en" data-theme="harbor-light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Data Depot</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230c7c86'/%3E%3Cpath d='M9 10h14v3H9zm0 5h14v3H9zm0 5h9v3H9z' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="app" id="app">
+  <nav class="rail" aria-label="Main">
+    <div class="logo" title="AI Data Depot"></div>
+    <button class="nav on" data-view="chat"><i class="ic ic-chat"></i>Chat</button>
+    <button class="nav" data-view="sources"><i class="ic ic-src"></i>Sources</button>
+    <button class="nav" data-view="personas"><i class="ic ic-per"></i>Personas</button>
+    <button class="nav" data-view="sessions"><i class="ic ic-ses"></i>Sessions</button>
+    <div class="grow"></div>
+    <button class="nav set" data-view="settings"><i class="ic ic-set"></i>Settings</button>
+  </nav>
+
+  <div class="handle l" id="handle-l" title="Click to open/close · drag to resize"><b>‹</b></div>
+  <div class="handle r" id="handle-r" title="Click to open/close · drag to resize"><b>›</b></div>
+
+  <aside class="drawer dl" id="drawer-l"><div class="in">
+    <p class="h">Reading from</p>
+    <div id="bundle-list" class="bundle-list"></div>
+    <button class="link" id="new-bundle-btn">+ New bundle</button>
+    <div class="idx-strip" id="idx-strip" hidden><div class="idx-bar"><i id="idx-fill"></i></div><div class="idx-msg" id="idx-msg"></div></div>
+  </div></aside>
+
+  <main class="main" id="main">
+    <!-- ================= CHAT ================= -->
+    <section class="view on" id="view-chat">
+      <header class="head">
+        <div class="t"><input id="session-name" class="session-name" value="New session" spellcheck="false" aria-label="Session name"><small id="session-sub">Persona: <select id="persona-select" class="inline-select"></select> · <span id="session-saved">unsaved</span></small></div>
+        <div class="sp"></div>
+        <span class="priv" id="priv-badge"><i></i><span id="priv-text">—</span></span>
+        <div class="menu-wrap">
+          <button class="btn" id="sessions-btn">Sessions ▾</button>
+          <div class="menu" id="sessions-menu" hidden>
+            <button class="mi" data-act="save">💾 Save</button>
+            <button class="mi" data-act="new">＋ New session</button>
+            <button class="mi" data-act="import">⤒ Import from file…</button>
+            <button class="mi" data-act="export-json">⬇ Export (.json)</button>
+            <button class="mi" data-act="export-md">⬇ Export (.md)</button>
+            <div class="mh">Load</div>
+            <div id="sessions-recent"></div>
+            <button class="mi link" data-act="all">All sessions ›</button>
+          </div>
+        </div>
+        <button class="btn pri" id="save-btn">Save</button>
+      </header>
+      <div class="thread" id="thread">
+        <div class="welcome" id="welcome">
+          <h2>Ask about your sources</h2>
+          <p>Answers come only from the bundles turned on in the Reading-from drawer, with a citation for every claim. If it isn't in your sources, it will say so.</p>
+          <p class="hint" id="welcome-hint"></p>
+        </div>
+      </div>
+      <div class="compose">
+        <textarea id="composer" rows="1" placeholder="Ask a question about your sources…" aria-label="Your question"></textarea>
+        <button class="btn pri" id="send-btn">Send</button>
+        <button class="btn" id="stop-btn" hidden>Stop</button>
+      </div>
+    </section>
+
+    <!-- ================= SOURCES ================= -->
+    <section class="view" id="view-sources">
+      <header class="head"><div class="t">Sources<small>Bundles of folders and websites the assistant may read</small></div><div class="sp"></div>
+        <button class="btn" id="index-files-btn">Re-index files</button><button class="btn" id="index-web-btn">Re-check websites</button><button class="btn pri" id="new-bundle-btn2">+ New bundle</button></header>
+      <div class="page" id="sources-page"></div>
+    </section>
+
+    <!-- ================= PERSONAS ================= -->
+    <section class="view" id="view-personas">
+      <header class="head"><div class="t">Personas<small>How the assistant speaks and what it focuses on — sources still rule</small></div><div class="sp"></div><button class="btn pri" id="new-persona-btn">+ New persona</button></header>
+      <div class="page two" id="personas-page"><div id="persona-list"></div><div id="persona-editor" class="card" hidden></div></div>
+    </section>
+
+    <!-- ================= SESSIONS ================= -->
+    <section class="view" id="view-sessions">
+      <header class="head"><div class="t">Sessions<small>Saved conversations — one per customer, matter or project</small></div><div class="sp"></div><label class="btn">⤒ Import<input type="file" id="import-file" accept="application/json" hidden></label><button class="btn pri" id="new-session-btn">＋ New session</button></header>
+      <div class="page" id="sessions-page"></div>
+    </section>
+
+    <!-- ================= SETTINGS ================= -->
+    <section class="view" id="view-settings">
+      <div class="settings">
+        <nav class="smenu" id="smenu">
+          <button class="on" data-sec="models">Models</button><button data-sec="appearance">Appearance</button><button data-sec="files">Indexing · Files</button><button data-sec="websites">Indexing · Websites</button><button data-sec="general">General</button><button data-sec="about">About</button>
+        </nav>
+        <div class="spane" id="spane"></div>
+      </div>
+    </section>
+  </main>
+
+  <aside class="drawer dr" id="drawer-r"><div class="in">
+    <div class="tabs"><button class="on" data-tab="passage">Cited passage</button><button data-tab="all">All sources <span id="src-count"></span></button></div>
+    <div id="evidence" class="evidence"><div class="empty">Click a citation like <span class="r">1</span> in an answer to see the passage it came from.</div></div>
+    <div id="evidence-all" class="evidence" hidden></div>
+  </div></aside>
+</div>
+
+<!-- folder browser -->
+<dialog id="browse-dialog" class="dialog">
+  <form method="dialog" class="dcard">
+    <div class="dh"><b>Choose a folder or file</b><button class="x" value="cancel" aria-label="Close">✕</button></div>
+    <div class="dpath"><button type="button" class="btn sm" id="browse-up">↑ Up</button><code id="browse-path"></code></div>
+    <div class="dlist" id="browse-list"></div>
+    <div class="df"><span class="hint">Choosing a folder includes everything inside it, sub-folders too.</span><div class="sp"></div><button type="button" class="btn" value="cancel" id="browse-cancel">Cancel</button><button type="button" class="btn pri" id="browse-choose">Use this folder</button></div>
+  </form>
+</dialog>
+<div class="toast" id="toast" hidden></div>
+<script src="/app.js"></script>
+</body>
+</html>
