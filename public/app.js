@@ -542,9 +542,10 @@ async function renderSettings() {
   $("#m-save") && ($("#m-save").onclick = saveModels); $("#m-save2") && ($("#m-save2").onclick = saveModels);
   $("#m-test") && ($("#m-test").onclick = guard(async () => { await saveModels(); }));
   const pickModel = (fieldId, what) => guard(async () => {
+    const prov = m.providers[m.active];
     const r = await api(`/api/models/list`);
-    if (!r.models.length) throw new Error(`${p.label} did not list any models. Check the server address and key, or type the model name.`);
-    const chosen = await pickFromList({ title: `${what} — ${p.label}`, items: r.models, current: $(fieldId).value.trim(), hint: `${r.models.length} models offered by ${p.label}` });
+    if (!r.models.length) throw new Error(`${prov.label} did not list any models. Check the server address and key, or type the model name.`);
+    const chosen = await pickFromList({ title: `${what} — ${prov.label}`, items: r.models, current: $(fieldId).value.trim(), hint: `${r.models.length} models offered by ${prov.label}` });
     if (chosen) { $(fieldId).value = chosen; toast(`${what}: ${chosen} — click Save to keep it.`); }
   });
   $("#m-pick-chat") && ($("#m-pick-chat").onclick = pickModel("#m-chat", "Chat model"));
