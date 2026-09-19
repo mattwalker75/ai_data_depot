@@ -63,6 +63,24 @@ let lastProgress = null;
 function current() { return running ? { id: running.id, kind: running.kind, target: running.target, queued: queue.length, status: "running", ...(lastProgress && lastProgress.id === running.id ? { done: lastProgress.done, total: lastProgress.total, message: lastProgress.message, started_at: lastProgress.started_at } : {}) } : null; }
 
 // ---------------------------------------------------------------- embedding + storage
+/**
+ * Indexing is pointless without a working embedding model, and reading ten
+ * thousand files (OCR included) only to fail each one at the last step is
+ * the worst way to find that out. So: one tiny embedding call before a job
+ * starts. If it fails, the job fails right there with a message that says
+ * what to set up. Returns {ok, provider, model, error}.
+ */
+async function embeddingReady() {
+  let p;
+  try { p = providers.embeddingProvider(); } catch (e) { return { ok: false, error: e.message }; }
+  try { await providers.embed(["ready check"], { provider: p.key }); return { ok: true, provider: p.label, model: p.embedding_model }; }
+  catch (e) { return { ok: false, provider: p.label, model: p.embedding_model, error: e.message }; }
+}
+async function assertEmbeddingReady() {
+  const r = await embeddingReady();
+  if (!r.ok) throw new Error(`Indexing needs a working model and none is set up — ${r.error} Open Settings → Models, choose a provider with an embedding model (Ollama with nomic-embed-text, or OpenAI with a key), then run this again. Nothing was read.`);
+}
+
 async function storeDocument({ source, kind, locator, title, mime, bytes, pages, page_count, ocr_pages, fetched_at }, progressNote) {
   const db = open();
   const f = config.get().indexing.files;
@@ -133,6 +151,7 @@ function walk(root, exts, out = []) {
 }
 
 async function indexPathSource(source, progress, { only } = {}) {
+  await assertEmbeddingReady();
   const db = open();
   const root = config.expandHome(source.location);
   if (!fs.existsSync(root)) { db.prepare("UPDATE sources SET status='error', last_error=? WHERE id=?").run("Not found on disk", source.id); throw new Error(`${source.location} does not exist`); }
@@ -168,6 +187,7 @@ async function indexPathSource(source, progress, { only } = {}) {
 
 // ---------------------------------------------------------------- websites
 async function indexWebsiteSource(source, progress) {
+  await assertEmbeddingReady();
   const db = open();
   db.prepare("UPDATE sources SET status='indexing', last_error=NULL WHERE id=?").run(source.id);
   const cap = config.get().indexing.websites.max_pages_per_site;
@@ -281,4 +301,4 @@ function recoverStaleState() {
   if (n) console.warn(`[index] ${n} job(s) were interrupted by a restart`);
 }
 
-module.exports = { recoverStaleState, events, indexFiles, indexWebsites, indexSource, stop, current, jobs, startWatchers, stopWatchers, startScheduler, walk };
+module.exports = { embeddingReady, recoverStaleState, events, indexFiles, indexWebsites, indexSource, stop, current, jobs, startWatchers, stopWatchers, startScheduler, walk };

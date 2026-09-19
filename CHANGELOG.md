@@ -4,6 +4,14 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 
 ## [Unreleased]
 
+### Fixed
+- 2026-09-19: **Indexing with no working model read every file for nothing.**
+  A run over 10,722 files (OCR included) failed 10,661 of them at the very
+  last step because the active provider had no API key. Indexing now makes
+  one tiny embedding call before it starts and refuses — with a message that
+  says what to set up — if that fails, so nothing is read in vain. The
+  Sources page shows the same warning while no model is working.
+
 ### Changed
 - 2026-09-19: **Indexing status lives with Sources.** The bar across the top is
   gone; while indexing runs, the Sources icon in the rail carries a pulsing

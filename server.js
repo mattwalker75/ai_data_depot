@@ -113,6 +113,7 @@ app.post("/api/open", wrap((req, res) => {
 }));
 
 // ---------------------------------------------------------------- indexing
+app.get("/api/index/ready", wrap(async (req, res) => res.json(await indexer.embeddingReady())));
 app.post("/api/index/files", wrap((req, res) => res.json({ jobs: indexer.indexFiles({ bundleId: req.body.bundle_id }) })));
 app.post("/api/index/websites", wrap((req, res) => res.json({ jobs: indexer.indexWebsites({ bundleId: req.body.bundle_id }) })));
 app.post("/api/index/stop", wrap((req, res) => { const was = indexer.current(); indexer.stop(); res.json({ ok: true, was_running: !!was }); }));

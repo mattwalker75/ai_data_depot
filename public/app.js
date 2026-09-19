@@ -298,7 +298,18 @@ function srcMeta(s) {
   if (s.status === "pending") return `<span class="pill">not indexed</span>`;
   return `<span class="pill ok">${s.doc_count} ${s.kind === "website" ? "pages" : "files"}</span> ${s.last_indexed_at ? `<span class="meta">${fmtWhen(s.last_indexed_at)}</span>` : ""}${s.last_error ? ` <span class="meta err" title="${esc(s.last_error)}">⚠</span>` : ""}`;
 }
+async function renderReadyNotice() {
+  const el = $("#ready-notice"); if (!el) return;
+  try {
+    const r = await api("/api/index/ready");
+    if (r.ok) { el.hidden = true; return; }
+    el.hidden = false;
+    el.innerHTML = `<span>⚠ <b>Indexing needs a model and none is working:</b> ${esc(r.error)} Indexing will refuse to start until this is fixed.</span><span class="sp"></span><button class="btn sm pri" id="ready-settings">Open Settings → Models</button>`;
+    $("#ready-settings").onclick = () => { state.sec = "models"; $$("#smenu button").forEach((x) => x.classList.toggle("on", x.dataset.sec === "models")); showView("settings"); };
+  } catch { el.hidden = true; }
+}
 function renderSources() {
+  renderReadyNotice();
   const el = $("#sources-page");
   if (!state.bundles.length) { el.innerHTML = `<div class="card"><div class="ct">No bundles yet</div><p class="hint">A bundle groups folders and websites you switch on or off together — “Federal tax code”, “Client · Henderson”. Create one, then add a folder or a website to it.</p><button class="btn pri" id="nb-inline">+ New bundle</button></div>`; $("#nb-inline").addEventListener("click", guard(newBundle)); return; }
   el.innerHTML = state.bundles.map((b) => `<div class="card" data-bundle="${b.id}">
