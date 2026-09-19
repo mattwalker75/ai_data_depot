@@ -22,7 +22,9 @@ const cfg = config.load();
 const db = open();
 const app = express();
 app.use(express.json({ limit: "20mb" }));
-app.use(express.static(path.join(__dirname, "public"), { extensions: ["html"] }));
+// UI files are served from disk; never let a browser keep a stale copy after
+// an update — always revalidate (ETag makes an unchanged file a cheap 304).
+app.use(express.static(path.join(__dirname, "public"), { extensions: ["html"], etag: true, lastModified: true, setHeaders: (res) => res.set("cache-control", "no-cache") }));
 
 const VERSION = require("./package.json").version;
 let restartNeeded = [];
