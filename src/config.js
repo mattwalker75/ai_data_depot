@@ -49,7 +49,9 @@ const DEFAULTS = {
              extensions: [".txt", ".md", ".markdown", ".html", ".htm", ".pdf", ".docx", ".xlsx", ".xls", ".csv", ".tsv", ".json", ".pptx", ".rtf"] },
     websites: { max_pages_per_site: 500, max_depth: 6, recheck_hours: 24, delay_ms: 1000, respect_robots: true, timeout_ms: 20000, user_agent: "AI-Data-Depot/0.1 (local reference assistant)" },
   },
-  appearance: { theme: "harbor-light", _presets_note: "harbor-light, harbor-dark, reading-room, ledger, system" },
+  appearance: { theme: "harbor-light", _presets_note: "harbor-light, harbor-dark, reading-room, ledger, graphite, system, or the id of a custom theme below",
+    _custom_note: "Your own colour themes: {id, name, dark, tokens:{bg, panel, ink, mute, line, acc, accInk, accSoft, accText, nav, navtxt, user, mark}}. Settings → Appearance edits these.",
+    custom_themes: [] },
   chat: { show_reasoning_ledger: true, not_found_phrase: "Not in your sources" },
 };
 

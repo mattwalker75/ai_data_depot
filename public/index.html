@@ -52,6 +52,7 @@
         </div>
         <button class="btn pri" id="save-btn">Save</button>
       </header>
+      <div class="notice" id="index-notice" hidden></div>
       <div class="thread" id="thread">
         <div class="welcome" id="welcome">
           <h2>Ask about your sources</h2>
@@ -103,13 +104,25 @@
   </div></aside>
 </div>
 
-<!-- folder browser -->
-<dialog id="browse-dialog" class="dialog">
+<!-- folder / file picker -->
+<dialog id="browse-dialog" class="dialog wide">
   <form method="dialog" class="dcard">
     <div class="dh"><b>Choose a folder or file</b><button class="x" value="cancel" aria-label="Close">✕</button></div>
-    <div class="dpath"><button type="button" class="btn sm" id="browse-up">↑ Up</button><code id="browse-path"></code></div>
-    <div class="dlist" id="browse-list"></div>
-    <div class="df"><span class="hint">Choosing a folder includes everything inside it, sub-folders too.</span><div class="sp"></div><button type="button" class="btn" value="cancel" id="browse-cancel">Cancel</button><button type="button" class="btn pri" id="browse-choose">Use this folder</button></div>
+    <div class="dpath"><button type="button" class="btn sm" id="browse-up" title="Up one level">↑</button><div class="crumbs" id="browse-crumbs"></div><input class="fld mono pathin" id="browse-input" spellcheck="false" aria-label="Path"><button type="button" class="btn sm" id="browse-go">Go</button></div>
+    <div class="dbody">
+      <div class="dside" id="browse-shortcuts"></div>
+      <div class="dlist" id="browse-list"><table class="ftable"><thead><tr><th></th><th>Name</th><th>Kind</th><th class="r">Size</th><th>Modified</th></tr></thead><tbody id="browse-rows"></tbody></table></div>
+    </div>
+    <div class="df"><label class="chk" id="browse-index-wrap"><input type="checkbox" id="browse-index"> Index right away <span class="hint">— until a source is indexed, the assistant cannot read it</span></label><div class="sp"></div><button type="button" class="btn" id="browse-cancel">Cancel</button><button type="button" class="btn pri" id="browse-choose">Use this folder</button></div>
+  </form>
+</dialog>
+<!-- generic small form (new bundle, add website) -->
+<dialog id="form-dialog" class="dialog">
+  <form method="dialog" class="dcard" id="form-dialog-form">
+    <div class="dh"><b id="form-title"></b><button class="x" value="cancel" aria-label="Close">✕</button></div>
+    <div class="dfields" id="form-fields"></div>
+    <div class="derr" id="form-error" hidden></div>
+    <div class="df"><div class="sp"></div><button type="button" class="btn" id="form-cancel">Cancel</button><button type="submit" class="btn pri" id="form-submit">Save</button></div>
   </form>
 </dialog>
 <div class="toast" id="toast" hidden></div>

@@ -71,8 +71,9 @@ app.post("/api/bundles/:id/sources", wrap((req, res) => {
   else { const abs = config.expandHome(location); if (!fs.existsSync(abs)) throw new Error(`"${location}" does not exist on this computer.`); }
   const id = db.prepare("INSERT INTO sources(bundle_id, kind, location) VALUES (?,?,?)").run(b.id, kind, location).lastInsertRowid;
   if (kind === "path") indexer.startWatchers();
-  if (req.body.index !== false) indexer.indexSource(id);
-  res.json({ id });
+  // Indexing is a deliberate step the user starts (Sources → Index), unless asked for here.
+  if (req.body.index === true) indexer.indexSource(id);
+  res.json({ id, indexed: req.body.index === true });
 }));
 app.delete("/api/sources/:id", wrap((req, res) => { db.prepare("DELETE FROM sources WHERE id=?").run(req.params.id); indexer.startWatchers(); res.json({ ok: true }); }));
 app.post("/api/sources/:id/index", wrap((req, res) => res.json({ job: indexer.indexSource(Number(req.params.id)) })));
@@ -83,14 +84,25 @@ app.get("/api/chunks/:id", wrap((req, res) => {
   res.json({ id: c.id, text: c.text, location: c.location, title: c.title, locator: c.locator, kind: c.kind });
 }));
 
-// A plain folder browser so nobody has to type a path.
+// A folder/file browser so nobody has to type a path. Returns what a file
+// dialog shows: name, kind, size, modified — plus the usual shortcuts.
 app.post("/api/fs/browse", wrap((req, res) => {
-  let dir = config.expandHome(String(req.body.path || os.homedir()));
-  if (!fs.existsSync(dir)) dir = os.homedir();
-  const st = fs.statSync(dir); if (!st.isDirectory()) dir = path.dirname(dir);
-  const entries = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => !e.name.startsWith(".")).map((e) => ({ name: e.name, dir: e.isDirectory(), supported: e.isFile() && require("./src/extract").supported(e.name) }))
-    .filter((e) => e.dir || e.supported).sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name) : a.dir ? -1 : 1));
-  res.json({ path: dir, parent: path.dirname(dir), entries });
+  const home = os.homedir();
+  let dir = config.expandHome(String(req.body.path || home));
+  if (!fs.existsSync(dir)) dir = home;
+  let st = fs.statSync(dir); if (!st.isDirectory()) dir = path.dirname(dir);
+  const { supported } = require("./src/extract");
+  const entries = [];
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (e.name.startsWith(".")) continue;
+    let est; try { est = fs.statSync(path.join(dir, e.name)); } catch { continue; }
+    const isDir = est.isDirectory();
+    if (!isDir && !supported(e.name)) continue;
+    entries.push({ name: e.name, dir: isDir, size: isDir ? null : est.size, mtime: est.mtime.toISOString(), ext: isDir ? "" : path.extname(e.name).slice(1).toLowerCase() });
+  }
+  entries.sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) : a.dir ? -1 : 1));
+  const shortcuts = [["Home", home], ["Desktop", path.join(home, "Desktop")], ["Documents", path.join(home, "Documents")], ["Downloads", path.join(home, "Downloads")]].filter(([, p]) => fs.existsSync(p)).map(([name, p]) => ({ name, path: p }));
+  res.json({ path: dir, parent: path.dirname(dir), home, shortcuts, entries });
 }));
 app.post("/api/open", wrap((req, res) => {
   const target = String(req.body.locator || "");

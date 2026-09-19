@@ -4,6 +4,26 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 
 ## [Unreleased]
 
+### Changed
+- 2026-09-19: **Round-2 UI tweaks.** (1) The Reading-from and Evidence drawers
+  now belong to Chat only — Sources, Personas, Sessions and Settings use the
+  full width. (2) The persona in use carries an "Active — in use for chat"
+  label and a thick accent outline. (3) **Custom colour themes**: Settings →
+  Appearance has an editor (start from any preset, thirteen named colours,
+  dark/light, live preview) that saves themes into `config.json`
+  (`appearance.custom_themes`); custom themes appear beside the presets and
+  can be edited or deleted. (4) Adding a folder or file uses a file-dialog
+  style picker — Places sidebar, breadcrumbs, an editable path, a table with
+  kind, size and modified date, double-click to open. New bundle and Add
+  website are proper dialogs too (no more browser `prompt()` popups), with
+  errors shown inline. (5) **Indexing is now a deliberate step**: adding a
+  source no longer indexes it automatically. Each dialog offers "Index right
+  away"; otherwise the source shows an **Index** button, and Chat shows a
+  banner when an enabled bundle has sources the assistant cannot read yet.
+  To be clear about what indexing is: it is not a speed-up — it is how the
+  assistant reads a source at all. Until a source is indexed, it is invisible
+  to answers, and the app now says so rather than implying otherwise.
+
 ### Fixed
 - 2026-09-19: **Adding a large folder crashed the app** (`EMFILE: too many open
   files, watch`): live folder watching asks macOS for a file descriptor per

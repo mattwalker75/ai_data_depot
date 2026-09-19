@@ -18,10 +18,22 @@ const guard = (fn) => (...a) => Promise.resolve(fn(...a)).catch((e) => toast(e.m
 
 // ---------------------------------------------------------------- theme
 const mq = window.matchMedia("(prefers-color-scheme: dark)");
-function applyTheme(id) {
-  const t = id === "system" ? (mq.matches ? "harbor-dark" : "harbor-light") : id;
-  document.documentElement.dataset.theme = t || "harbor-light";
+const TOKENS = { bg: ["--bg", "Page background"], panel: ["--panel", "Panels"], ink: ["--ink", "Text"], mute: ["--mute", "Muted text"], line: ["--line", "Lines & borders"], acc: ["--acc", "Accent"], accInk: ["--acc-ink", "Text on accent"], accSoft: ["--acc-soft", "Accent tint"], accText: ["--acc-text", "Accent text"], nav: ["--nav", "Rail"], navtxt: ["--navtxt", "Rail text"], user: ["--user", "Your messages"], mark: ["--mark", "Highlight"] };
+function customTheme(id) { return ((state.config && state.config.appearance.custom_themes) || []).find((t) => t.id === id); }
+function applyTheme(id, preview) {
+  const root = document.documentElement;
+  for (const [v] of Object.values(TOKENS)) root.style.removeProperty(v);
+  const ct = preview || customTheme(id);
+  if (ct) { root.dataset.theme = "custom"; root.style.colorScheme = ct.dark ? "dark" : "light"; for (const [k, [v]] of Object.entries(TOKENS)) if (ct.tokens && ct.tokens[k]) root.style.setProperty(v, ct.tokens[k]); return; }
+  root.style.colorScheme = "";
+  root.dataset.theme = id === "system" ? (mq.matches ? "harbor-dark" : "harbor-light") : (id || "harbor-light");
 }
+/** Read a preset's colours out of the stylesheet, so a custom theme can start from one. */
+function presetTokens(id) {
+  const probe = document.createElement("div"); probe.dataset.theme = id === "system" ? (mq.matches ? "harbor-dark" : "harbor-light") : id; probe.hidden = true; document.body.appendChild(probe);
+  const cs = getComputedStyle(probe); const out = {}; for (const [k, [v]] of Object.entries(TOKENS)) out[k] = toHex(cs.getPropertyValue(v).trim()); probe.remove(); return out;
+}
+function toHex(c) { if (/^#[0-9a-f]{6}$/i.test(c)) return c.toLowerCase(); const m = c.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/); if (m) return "#" + [m[1], m[2], m[3]].map((n) => Number(n).toString(16).padStart(2, "0")).join(""); if (/^#[0-9a-f]{3}$/i.test(c)) return "#" + c.slice(1).split("").map((x) => x + x).join("").toLowerCase(); return "#888888"; }
 mq.addEventListener("change", () => state.config && applyTheme(state.config.appearance.theme));
 
 // ---------------------------------------------------------------- drawers
@@ -60,7 +72,7 @@ async function refresh() {
   const s = await api("/api/state");
   Object.assign(state, { config: s.config, bundles: s.bundles, personas: s.personas, sessions: s.sessions, presets: s.presets || state.presets, meta: { version: s.version, config_path: s.config_path, data_dir: s.data_dir, sqlite_vec: s.sqlite_vec, restart_required: s.restart_required } });
   applyTheme(state.config.appearance.theme);
-  renderBundles(); renderPersonaSelect(); renderSessionsMenu(); renderWelcome();
+  renderBundles(); renderPersonaSelect(); renderSessionsMenu(); renderWelcome(); renderIndexNotice();
   if (s.job) showJob({ status: "running", ...s.job });
 }
 function enabledBundleIds() { return state.bundles.filter((b) => b.enabled).map((b) => b.id); }
@@ -85,10 +97,47 @@ function renderWelcome() {
   $("#welcome-hint").textContent = state.bundles.length ? `${on} of ${state.bundles.length} bundles on · ${docs.toLocaleString()} documents indexed` : "Start by adding a bundle in Sources.";
 }
 async function newBundle() {
-  const name = prompt("Name for the new bundle (e.g. “Federal tax code 2026” or “Client · Henderson”):");
-  if (!name || !name.trim()) return;
-  await api("/api/bundles", { method: "POST", body: { name: name.trim() } });
-  await refresh(); showView("sources"); renderSources();
+  const v = await formDialog({ title: "New bundle", submit: "Create", fields: [
+    { id: "name", label: "Name", placeholder: "e.g. Federal tax code 2026, or Client · Henderson", autofocus: true },
+    { id: "description", label: "Description (optional)", placeholder: "What this bundle is for" }],
+    onSubmit: async (v) => { if (!v.name) throw new Error("Give the bundle a name."); await api("/api/bundles", { method: "POST", body: { name: v.name, description: v.description } }); } });
+  if (!v) return;
+  await refresh(); showView("sources"); renderSources(); toast(`Bundle “${v.name}” created — now add a folder, a file or a website to it.`);
+}
+async function addWebsite(bundleId) {
+  const v = await formDialog({ title: "Add a website", submit: "Add", fields: [
+    { id: "url", label: "Website address", mono: true, placeholder: "https://www.irs.gov/privacy-disclosure", autofocus: true, help: "Everything under this address is in scope — that example also covers /privacy-disclosure/tax-code-regulations-and-official-guidance. Nothing outside it is ever fetched." },
+    { id: "index", type: "checkbox", label: "Read it right away", value: false, help: "otherwise click Index on the source when you are ready — until then the assistant cannot read it" }],
+    onSubmit: async (v) => { if (!v.url) throw new Error("Enter the website address."); await api(`/api/bundles/${bundleId}/sources`, { method: "POST", body: { kind: "website", location: v.url, index: v.index } }); } });
+  if (!v) return;
+  await refresh(); renderSources(); toast(v.index ? "Added — reading the site now." : "Added. Click Index on it when you are ready.");
+}
+/** Small modal form. Resolves with the values on submit, null on cancel; onSubmit may throw to show an error inline. */
+function formDialog({ title, fields, submit = "Save", onSubmit }) {
+  return new Promise((resolve) => {
+    const dlg = $("#form-dialog"), form = $("#form-dialog-form"), err = $("#form-error");
+    $("#form-title").textContent = title; $("#form-submit").textContent = submit; err.hidden = true;
+    $("#form-fields").innerHTML = fields.map((f) => f.type === "checkbox"
+      ? `<label class="chk" style="color:var(--ink);font-weight:500;font-size:13px"><input type="checkbox" id="ff-${f.id}" ${f.value ? "checked" : ""}> ${esc(f.label)}${f.help ? ` <span class="hint">${esc(f.help)}</span>` : ""}</label>`
+      : `<div><label for="ff-${f.id}">${esc(f.label)}</label><input class="fld${f.mono ? " mono" : ""}" id="ff-${f.id}" value="${esc(f.value || "")}" placeholder="${esc(f.placeholder || "")}">${f.help ? `<div class="help">${esc(f.help)}</div>` : ""}</div>`).join("");
+    const values = () => Object.fromEntries(fields.map((f) => [f.id, f.type === "checkbox" ? $(`#ff-${f.id}`).checked : $(`#ff-${f.id}`).value.trim()]));
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; if (dlg.open) dlg.close(); resolve(v); };
+    form.onsubmit = async (e) => { e.preventDefault(); const v = values(); $("#form-submit").disabled = true;
+      try { if (onSubmit) await onSubmit(v); finish(v); } catch (ex) { err.textContent = ex.message; err.hidden = false; } finally { $("#form-submit").disabled = false; } };
+    $("#form-cancel").onclick = () => finish(null);
+    dlg.onclose = () => finish(null);
+    dlg.showModal(); const first = $("#form-fields input"); if (first) first.focus();
+  });
+}
+function renderIndexNotice() {
+  const el = $("#index-notice"); if (!el) return;
+  const pending = state.bundles.filter((b) => b.enabled).flatMap((b) => b.sources.filter((s) => s.status === "pending" || (s.status === "error" && !s.doc_count)).map((s) => ({ ...s, bundle: b.name })));
+  if (!pending.length) { el.hidden = true; return; }
+  el.hidden = false;
+  const n = pending.length;
+  el.innerHTML = `<span>⚠ ${n} source${n > 1 ? "s" : ""} in your enabled bundles ${n > 1 ? "are" : "is"} not indexed yet, so the assistant cannot read ${n > 1 ? "them" : "it"}: <b>${pending.slice(0, 3).map((s) => esc(s.location)).join("</b>, <b>")}</b>${n > 3 ? "…" : ""}</span><span class="sp"></span><button class="btn sm pri" id="notice-index">Index now</button>`;
+  $("#notice-index").onclick = guard(async () => { for (const s of pending) await api(`/api/sources/${s.id}/index`, { method: "POST" }); toast("Indexing started."); el.hidden = true; });
 }
 
 // ---------------------------------------------------------------- privacy badge
@@ -255,28 +304,50 @@ function renderSources() {
   el.innerHTML = state.bundles.map((b) => `<div class="card" data-bundle="${b.id}">
     <div class="ct"><button class="toggle ${b.enabled ? "on" : ""}" data-toggle="${b.id}" title="${b.enabled ? "On — the assistant may read this bundle" : "Off"}" aria-label="Enable bundle"></button><input class="session-name" data-rename="${b.id}" value="${esc(b.name)}" aria-label="Bundle name"><span class="sp"></span>
       <button class="btn sm" data-addpath="${b.id}">+ Folder or file</button><button class="btn sm" data-addweb="${b.id}">+ Website</button><button class="btn sm" data-docs="${b.id}">Documents</button><button class="btn sm danger" data-delbundle="${b.id}">Delete</button></div>
-    ${b.sources.length ? b.sources.map((s) => `<div class="srcline"><span class="k">${s.kind === "website" ? "website" : "folder"}</span><span class="loc" title="${esc(s.location)}">${esc(s.location)}</span>${srcMeta(s)}<button class="btn sm" data-reindex="${s.id}">${s.kind === "website" ? "Re-check" : "Re-index"}</button><button class="btn sm danger" data-delsrc="${s.id}">Remove</button></div>`).join("") : `<div class="hint">No sources yet — add a folder, a file, or a website.</div>`}
+    ${b.sources.length ? b.sources.map((s) => `<div class="srcline"><span class="k">${s.kind === "website" ? "website" : "folder"}</span><span class="loc" title="${esc(s.location)}">${esc(s.location)}</span>${srcMeta(s)}<button class="btn sm ${s.status === "pending" ? "pri" : ""}" data-reindex="${s.id}">${s.status === "pending" ? "Index" : s.kind === "website" ? "Re-check" : "Re-index"}</button><button class="btn sm danger" data-delsrc="${s.id}">Remove</button></div>`).join("") : `<div class="hint">No sources yet — add a folder, a file, or a website.</div>`}
     <div class="docs" id="docs-${b.id}" hidden></div></div>`).join("");
   $$("[data-toggle]", el).forEach((t) => t.addEventListener("click", guard(async () => { await api(`/api/bundles/${t.dataset.toggle}`, { method: "PATCH", body: { enabled: !t.classList.contains("on") } }); await refresh(); renderSources(); })));
   $$("[data-rename]", el).forEach((i) => i.addEventListener("change", guard(async () => { await api(`/api/bundles/${i.dataset.rename}`, { method: "PATCH", body: { name: i.value } }); await refresh(); })));
-  $$("[data-addpath]", el).forEach((b) => b.addEventListener("click", guard(async () => { const p = await browse(); if (!p) return; await api(`/api/bundles/${b.dataset.addpath}/sources`, { method: "POST", body: { kind: "path", location: p } }); toast("Added — indexing has started."); await refresh(); renderSources(); })));
-  $$("[data-addweb]", el).forEach((b) => b.addEventListener("click", guard(async () => { const u = prompt("Website address. Everything under it is in scope — e.g. https://www.irs.gov/privacy-disclosure also covers /privacy-disclosure/tax-code-regulations-and-official-guidance:"); if (!u) return; await api(`/api/bundles/${b.dataset.addweb}/sources`, { method: "POST", body: { kind: "website", location: u.trim() } }); toast("Added — the site is being read now."); await refresh(); renderSources(); })));
+  $$("[data-addpath]", el).forEach((b) => b.addEventListener("click", guard(async () => { const p = await browse(); if (!p) return; await api(`/api/bundles/${b.dataset.addpath}/sources`, { method: "POST", body: { kind: "path", location: p.path, index: p.index } }); toast(p.index ? "Added — indexing has started." : "Added. Click Index on it when you are ready."); await refresh(); renderSources(); })));
+  $$("[data-addweb]", el).forEach((b) => b.addEventListener("click", guard(() => addWebsite(b.dataset.addweb))));
   $$("[data-reindex]", el).forEach((b) => b.addEventListener("click", guard(async () => { await api(`/api/sources/${b.dataset.reindex}/index`, { method: "POST" }); toast("Queued."); })));
   $$("[data-delsrc]", el).forEach((b) => b.addEventListener("click", guard(async () => { if (!confirm("Remove this source and everything indexed from it?")) return; await api(`/api/sources/${b.dataset.delsrc}`, { method: "DELETE" }); await refresh(); renderSources(); })));
   $$("[data-delbundle]", el).forEach((b) => b.addEventListener("click", guard(async () => { if (!confirm("Delete this bundle, its sources and everything indexed from them?")) return; await api(`/api/bundles/${b.dataset.delbundle}`, { method: "DELETE" }); await refresh(); renderSources(); })));
   $$("[data-docs]", el).forEach((b) => b.addEventListener("click", guard(async () => { const box = $(`#docs-${b.dataset.docs}`); if (!box.hidden) { box.hidden = true; return; } const docs = await api(`/api/bundles/${b.dataset.docs}/documents`); box.hidden = false;
     box.innerHTML = docs.length ? `<table class="tbl" style="margin-top:10px"><tr><th>Document</th><th>Where</th><th>Pages</th><th>Status</th></tr>${docs.map((d) => `<tr><td>${esc(d.title || d.locator)}${d.ocr_pages ? ` <span class="pill" title="pages read with OCR">OCR ${d.ocr_pages}</span>` : ""}</td><td class="loc" style="font-family:var(--mono);font-size:11.5px;max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(d.locator)}">${esc(d.locator)}</td><td class="r">${d.page_count || ""}</td><td>${d.status === "ok" ? `<span class="pill ok">indexed</span>` : `<span class="pill err" title="${esc(d.error || "")}">${esc(d.error || "error")}</span>`}</td></tr>`).join("")}</table>` : `<div class="hint" style="margin-top:8px">Nothing indexed yet.</div>`; })));
 }
-// folder browser
+// folder / file picker — looks and behaves like a file dialog
 function browse() {
   return new Promise((resolve) => {
-    const dlg = $("#browse-dialog"); let cur = store.get("browsePath", null), selected = null;
-    async function go(p) { const r = await api("/api/fs/browse", { method: "POST", body: { path: p } }); cur = r.path; selected = null; $("#browse-path").textContent = r.path; $("#browse-choose").textContent = "Use this folder"; $("#browse-up").onclick = () => go(r.parent);
-      $("#browse-list").innerHTML = r.entries.map((e) => `<button type="button" data-name="${esc(e.name)}" data-dir="${e.dir ? 1 : 0}"><span class="ico">${e.dir ? "▸" : "·"}</span>${esc(e.name)}</button>`).join("") || `<div class="hint" style="padding:10px">Nothing here that can be indexed.</div>`;
-      $$("button[data-name]", $("#browse-list")).forEach((b) => { b.addEventListener("dblclick", () => { if (b.dataset.dir === "1") go(cur + "/" + b.dataset.name); }); b.addEventListener("click", () => { $$("button.on", $("#browse-list")).forEach((x) => x.classList.remove("on")); b.classList.add("on"); selected = b.dataset.name; $("#browse-choose").textContent = b.dataset.dir === "1" ? `Use “${b.dataset.name}”` : `Use this file`; }); }); }
-    $("#browse-choose").onclick = () => { const p = selected ? cur + "/" + selected : cur; store.set("browsePath", cur); dlg.close(); resolve(p); };
-    $("#browse-cancel").onclick = () => { dlg.close(); resolve(null); };
-    dlg.addEventListener("close", () => resolve(null), { once: true });
+    const dlg = $("#browse-dialog"); let cur = store.get("browsePath", null), selected = null, entries = [];
+    const join = (a, b) => (a.endsWith("/") ? a : a + "/") + b;
+    const fmtSize = (n) => n == null ? "—" : n < 1024 ? n + " B" : n < 1048576 ? Math.round(n / 1024) + " KB" : n < 1073741824 ? (n / 1048576).toFixed(1) + " MB" : (n / 1073741824).toFixed(2) + " GB";
+    const fmtDate = (iso) => new Date(iso).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+    const KIND = { pdf: "PDF", docx: "Word", xlsx: "Excel", xls: "Excel", csv: "CSV", tsv: "TSV", pptx: "PowerPoint", md: "Markdown", markdown: "Markdown", txt: "Text", html: "HTML", htm: "HTML", json: "JSON", rtf: "RTF" };
+    const kind = (e) => (e.dir ? "Folder" : KIND[e.ext] || e.ext.toUpperCase());
+    const chooseBtn = $("#browse-choose");
+    const setSel = (name) => { selected = name; $$("#browse-rows tr").forEach((r) => r.classList.toggle("on", r.dataset.name === name)); const e = entries.find((x) => x.name === name); chooseBtn.textContent = !e ? "Use this folder" : e.dir ? `Use folder “${e.name}”` : `Use file “${e.name}”`; };
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; store.set("browsePath", cur); if (dlg.open) dlg.close(); resolve(v ? { ...v, index: $("#browse-index").checked } : null); };
+    async function go(p) {
+      const r = await api("/api/fs/browse", { method: "POST", body: { path: p } }); cur = r.path; entries = r.entries;
+      $("#browse-input").value = r.path;
+      const parts = r.path.split("/").filter(Boolean); let acc = "";
+      $("#browse-crumbs").innerHTML = `<button type="button" data-go="/">/</button>` + parts.map((seg) => { acc += "/" + seg; return `<span class="sep">›</span><button type="button" data-go="${esc(acc)}">${esc(seg)}</button>`; }).join("");
+      $$("#browse-crumbs button").forEach((b) => (b.onclick = () => go(b.dataset.go)));
+      $("#browse-shortcuts").innerHTML = `<div class="h">Places</div>` + r.shortcuts.map((sc) => `<button type="button" data-go="${esc(sc.path)}" class="${sc.path === r.path ? "on" : ""}">${esc(sc.name)}</button>`).join("");
+      $$("#browse-shortcuts button").forEach((b) => (b.onclick = () => go(b.dataset.go)));
+      $("#browse-up").onclick = () => go(r.parent);
+      $("#browse-rows").innerHTML = entries.map((e) => `<tr data-name="${esc(e.name)}" data-dir="${e.dir ? 1 : 0}"><td class="ico">${e.dir ? "▸" : "·"}</td><td class="nm">${esc(e.name)}</td><td class="kd">${kind(e)}</td><td class="r">${fmtSize(e.size)}</td><td class="mt">${fmtDate(e.mtime)}</td></tr>`).join("") || `<tr><td colspan="5" class="hint" style="padding:16px">Nothing here that can be indexed.</td></tr>`;
+      $$("#browse-rows tr[data-name]").forEach((tr) => { tr.addEventListener("click", () => setSel(tr.dataset.name)); tr.addEventListener("dblclick", () => { if (tr.dataset.dir === "1") go(join(cur, tr.dataset.name)); else finish({ path: join(cur, tr.dataset.name) }); }); });
+      setSel(null);
+    }
+    $("#browse-go").onclick = () => go($("#browse-input").value.trim() || cur);
+    $("#browse-input").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); go($("#browse-input").value.trim() || cur); } };
+    chooseBtn.onclick = () => finish({ path: selected ? join(cur, selected) : cur });
+    $("#browse-cancel").onclick = () => finish(null);
+    dlg.onclose = () => finish(null);
+    $("#browse-index").checked = false;
     go(cur).then(() => dlg.showModal()).catch((e) => { toast(e.message); resolve(null); });
   });
 }
@@ -292,7 +363,7 @@ function wireIndexEvents() { const es = new EventSource("/api/index/events"); es
 let editing = null;
 function renderPersonas() {
   const cur = currentPersona();
-  $("#persona-list").innerHTML = `<div class="plist">${state.personas.map((p) => `<div class="card pcard ${p.id === cur ? "on" : ""}" data-pid="${esc(p.id)}"><div class="ct">${esc(p.name)}<span class="tag">${p.builtin ? "built-in" : "yours"}</span></div><div class="d">${esc(p.description)}</div></div>`).join("")}</div>`;
+  $("#persona-list").innerHTML = `<div class="plist">${state.personas.map((p) => `<div class="card pcard ${p.id === cur ? "on" : ""}" data-pid="${esc(p.id)}"><div class="ct">${esc(p.name)} <span class="tag">${p.builtin ? "built-in" : "yours"}</span>${p.id === cur ? `<span class="pill ok">Active — in use for chat</span>` : ""}</div><div class="d">${esc(p.description)}</div></div>`).join("")}</div>`;
   $$("[data-pid]").forEach((c) => c.addEventListener("click", () => editPersona(state.personas.find((p) => p.id === c.dataset.pid))));
   if (editing) editPersona(state.personas.find((p) => p.id === editing.id) || editing); else $("#persona-editor").hidden = true;
 }
@@ -337,7 +408,14 @@ async function renderSettings() {
       <div class="row wide"><button class="btn pri" id="m-save2">Save</button></div></div>`;
   } else if (state.sec === "appearance") {
     const sw = { "harbor-light": "linear-gradient(#f3f6f8 55%,#0f1b26 55%)", "harbor-dark": "linear-gradient(#0f1418 55%,#161c22 55%)", "reading-room": "linear-gradient(#f7f3ec 55%,#7a2e1f 55%)", ledger: "linear-gradient(#fafbf9 55%,#2f6b3a 55%)", graphite: "linear-gradient(#141416 55%,#d9b45c 55%)", system: "linear-gradient(90deg,#f3f6f8 50%,#0f1418 50%)" };
-    html += `<div class="card"><div class="ct">Theme</div><div class="sw">${state.presets.map((t) => `<button data-theme="${t.id}" class="${state.config.appearance.theme === t.id ? "on" : ""}"><i style="background:${sw[t.id] || "#888"}"></i>${esc(t.name)}</button>`).join("")}</div><p class="hint" style="margin:10px 0 0">Presets are token sets in public/style.css; a custom theme is one more block there.</p></div>`;
+    const customs = state.config.appearance.custom_themes || []; const cur = state.config.appearance.theme;
+    html += `<div class="card"><div class="ct">Theme</div><div class="sw">${state.presets.map((t) => `<button data-theme="${t.id}" class="${cur === t.id ? "on" : ""}"><i style="background:${sw[t.id] || "#888"}"></i>${esc(t.name)}</button>`).join("")}${customs.map((t) => `<button data-theme="${esc(t.id)}" class="${cur === t.id ? "on" : ""}"><i style="background:linear-gradient(${t.tokens.bg} 55%,${t.tokens.acc} 55%)"></i>${esc(t.name)}</button>`).join("")}</div>
+      ${customs.length ? `<div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">${customs.map((t) => `<button class="btn sm" data-edit-theme="${esc(t.id)}">Edit “${esc(t.name)}”</button><button class="btn sm danger" data-del-theme="${esc(t.id)}">Delete</button>`).join("")}</div>` : ""}</div>
+      <div class="card" id="theme-editor"><div class="ct"><span id="te-title">Create your own theme</span><span class="sp"></span><label style="font-weight:500;font-size:12.5px">Start from <select class="fld" id="te-base" style="width:auto;padding:4px 8px">${state.presets.filter((t) => t.id !== "system").map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("")}</select></label></div>
+      <div class="row"><label>Name</label><input class="fld" id="te-name" placeholder="e.g. Sunset"></div>
+      <div class="row"><label>Dark theme</label><span class="chk"><input type="checkbox" id="te-dark"><span class="hint">affects form controls and scrollbars</span></span></div>
+      <div class="themegrid" id="te-grid" style="margin:8px 0 12px"></div>
+      <div class="row wide" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri" id="te-save">Save theme</button><button class="btn" id="te-preview">Preview</button><button class="btn" id="te-revert">Back to current theme</button><span class="hint" style="align-self:center">Changes preview live as you pick colours.</span></div></div>`;
   } else if (state.sec === "files") {
     const f = ix.files; const srcs = state.bundles.flatMap((b) => b.sources.filter((s) => s.kind === "path").map((s) => ({ ...s, bundle: b.name })));
     html += `<div class="card"><div class="ct">Files <span class="sp"></span><button class="btn" id="ix-files">Re-index all files</button><button class="btn" id="ix-stop">Stop</button></div>
@@ -384,6 +462,29 @@ async function renderSettings() {
   $("#m-refresh") && ($("#m-refresh").onclick = guard(async () => { const r = await api(`/api/models/list`); $("#m-list").innerHTML = r.models.map((x) => `<option value="${esc(x)}">`).join(""); toast(`${r.models.length} models listed — pick from the field's dropdown.`); }));
   if ($("#m-status")) { api("/api/models/status").then((st) => { const el = $("#m-status"); if (!st.reachable) { el.className = "status bad"; el.textContent = `Not reachable — ${st.error}`; return; } const parts = [`Connected${st.models.length ? ` — ${st.models.length} models available` : ""}`]; if (st.chat_model_found === false) parts.push(`chat model “${st.chat_model}” not found`); if (st.embedding_model_found === false) parts.push(`embedding model “${st.embedding_model}” not found`); if (!st.embedding_model) parts.push("no embedding model set — indexing will use the fallback provider"); el.className = "status " + (parts.length > 1 ? "bad" : "ok"); el.textContent = parts.join(" · "); }).catch((e) => { $("#m-status").className = "status bad"; $("#m-status").textContent = e.message; }); }
   $$("[data-theme]", pane).forEach((b) => b.addEventListener("click", guard(async () => { await api("/api/settings", { method: "PUT", body: { appearance: { theme: b.dataset.theme } } }); state.config.appearance.theme = b.dataset.theme; applyTheme(b.dataset.theme); await renderSettings(); })));
+  if ($("#theme-editor")) {
+    let editingId = null;
+    const grid = $("#te-grid");
+    const fill = (tokens) => { grid.innerHTML = Object.entries(TOKENS).map(([k, [v, label]]) => `<label><input type="color" data-tok="${k}" value="${tokens[k] || "#888888"}">${esc(label)}<span class="tk">${v}</span></label>`).join(""); $$("input[data-tok]", grid).forEach((i) => i.addEventListener("input", preview)); };
+    const tokensNow = () => Object.fromEntries($$("input[data-tok]", grid).map((i) => [i.dataset.tok, i.value]));
+    const preview = () => applyTheme(null, { tokens: tokensNow(), dark: $("#te-dark").checked });
+    const startFrom = () => { const base = $("#te-base").value; fill(presetTokens(base)); $("#te-dark").checked = /dark|graphite/.test(base); preview(); };
+    $("#te-base").addEventListener("change", startFrom);
+    const curCustom = customTheme(state.config.appearance.theme);
+    if (curCustom) { editingId = curCustom.id; $("#te-title").textContent = `Edit “${curCustom.name}”`; $("#te-name").value = curCustom.name; $("#te-dark").checked = !!curCustom.dark; fill(curCustom.tokens); } else fill(presetTokens(state.config.appearance.theme === "system" ? (mq.matches ? "harbor-dark" : "harbor-light") : state.config.appearance.theme));
+    $$("[data-edit-theme]", pane).forEach((b) => b.addEventListener("click", () => { const t = customTheme(b.dataset.editTheme); editingId = t.id; $("#te-title").textContent = `Edit “${t.name}”`; $("#te-name").value = t.name; $("#te-dark").checked = !!t.dark; fill(t.tokens); preview(); $("#theme-editor").scrollIntoView({ behavior: "smooth" }); }));
+    $$("[data-del-theme]", pane).forEach((b) => b.addEventListener("click", guard(async () => { const t = customTheme(b.dataset.delTheme); if (!confirm(`Delete the theme “${t.name}”?`)) return; const rest = (state.config.appearance.custom_themes || []).filter((x) => x.id !== t.id); const theme = state.config.appearance.theme === t.id ? "harbor-light" : state.config.appearance.theme; await api("/api/settings", { method: "PUT", body: { appearance: { custom_themes: rest, theme } } }); state.config.appearance.custom_themes = rest; state.config.appearance.theme = theme; applyTheme(theme); await renderSettings(); })));
+    $("#te-preview").onclick = preview;
+    $("#te-revert").onclick = () => applyTheme(state.config.appearance.theme);
+    $("#te-save").onclick = guard(async () => {
+      const name = $("#te-name").value.trim(); if (!name) throw new Error("Give the theme a name.");
+      const id = editingId || ("custom-" + name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") + "-" + Date.now().toString(36).slice(-4));
+      const theme = { id, name, dark: $("#te-dark").checked, tokens: tokensNow() };
+      const list = (state.config.appearance.custom_themes || []).filter((x) => x.id !== id); list.push(theme);
+      await api("/api/settings", { method: "PUT", body: { appearance: { custom_themes: list, theme: id } } });
+      state.config.appearance.custom_themes = list; state.config.appearance.theme = id; applyTheme(id); toast(`Theme “${name}” saved and applied.`); await renderSettings();
+    });
+  }
   $("#f-save") && ($("#f-save").onclick = guard(async () => { await api("/api/settings", { method: "PUT", body: { indexing: { files: { watch: $("#f-watch").checked, ocr: $("#f-ocr").checked, ocr_min_chars_per_page: Number($("#f-ocrmin").value), max_file_mb: Number($("#f-max").value), chunk_chars: Number($("#f-chunk").value), extensions: $("#f-ext").value.split(/[\s,]+/).filter(Boolean).map((e) => (e.startsWith(".") ? e : "." + e).toLowerCase()) } } } }); toast("Saved."); await renderSettings(); }));
   $("#w-save") && ($("#w-save").onclick = guard(async () => { await api("/api/settings", { method: "PUT", body: { indexing: { websites: { max_pages_per_site: Number($("#w-cap").value), max_depth: Number($("#w-depth").value), recheck_hours: Number($("#w-hours").value), delay_ms: Number($("#w-delay").value), respect_robots: $("#w-robots").checked } } } }); toast("Saved."); await renderSettings(); }));
   $("#g-save") && ($("#g-save").onclick = guard(async () => { const r = await api("/api/settings", { method: "PUT", body: { server: { port: Number($("#g-port").value), host: $("#g-host").value, open_browser: $("#g-open").checked }, data_dir: $("#g-data").value.trim() } }); toast(r.changed_now.length ? "Saved — restart to apply " + r.changed_now.join(", ") : "Saved."); await renderSettings(); }));
@@ -397,6 +498,7 @@ async function renderSettings() {
 // ---------------------------------------------------------------- views
 function showView(v) {
   state.view = v; $$(".rail .nav").forEach((b) => b.classList.toggle("on", b.dataset.view === v)); $$(".view").forEach((s) => s.classList.toggle("on", s.id === "view-" + v));
+  $("#app").classList.toggle("nodrawers", v !== "chat"); // the Reading-from and Evidence drawers belong to Chat
   if (v === "sources") renderSources(); if (v === "personas") renderPersonas(); if (v === "sessions") renderSessionsPage().catch((e) => toast(e.message)); if (v === "settings") renderSettings().catch((e) => toast(e.message));
 }
 
