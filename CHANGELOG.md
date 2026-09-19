@@ -10,7 +10,10 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
   last step because the active provider had no API key. Indexing now makes
   one tiny embedding call before it starts and refuses — with a message that
   says what to set up — if that fails, so nothing is read in vain. The
-  Sources page shows the same warning while no model is working.
+  Sources page shows the same warning while no model is working, and clicking
+  Index / Re-index (anywhere) first does that quick check and opens a
+  "No model is connected" window with the reason and a button to
+  Settings → Models, queuing nothing.
 
 ### Changed
 - 2026-09-19: **Indexing status lives with Sources.** The bar across the top is

@@ -108,16 +108,18 @@ async function addWebsite(bundleId) {
   const v = await formDialog({ title: "Add a website", submit: "Add", fields: [
     { id: "url", label: "Website address", mono: true, placeholder: "https://www.irs.gov/privacy-disclosure", autofocus: true, help: "Everything under this address is in scope — that example also covers /privacy-disclosure/tax-code-regulations-and-official-guidance. Nothing outside it is ever fetched." },
     { id: "index", type: "checkbox", label: "Read it right away", value: false, help: "otherwise click Index on the source when you are ready — until then the assistant cannot read it" }],
-    onSubmit: async (v) => { if (!v.url) throw new Error("Enter the website address."); await api(`/api/bundles/${bundleId}/sources`, { method: "POST", body: { kind: "website", location: v.url, index: v.index } }); } });
+    onSubmit: async (v) => { if (!v.url) throw new Error("Enter the website address."); await api(`/api/bundles/${bundleId}/sources`, { method: "POST", body: { kind: "website", location: v.url, index: false } }); } });
   if (!v) return;
-  await refresh(); renderSources(); toast(v.index ? "Added — reading the site now." : "Added. Click Index on it when you are ready.");
+  await refresh(); renderSources();
+  if (v.index) { if (await ensureModelReady()) { const src = state.bundles.flatMap((b) => b.sources).find((x) => x.location === v.url || x.location === "https://" + v.url); if (src) await api(`/api/sources/${src.id}/index`, { method: "POST" }); toast("Added — reading the site now."); } }
+  else toast("Added. Click Index on it when you are ready.");
 }
 /** Small modal form. Resolves with the values on submit, null on cancel; onSubmit may throw to show an error inline. */
-function formDialog({ title, fields, submit = "Save", onSubmit }) {
+function formDialog({ title, fields = [], submit = "Save", cancel = "Cancel", message = "", onSubmit }) {
   return new Promise((resolve) => {
     const dlg = $("#form-dialog"), form = $("#form-dialog-form"), err = $("#form-error");
-    $("#form-title").textContent = title; $("#form-submit").textContent = submit; err.hidden = true;
-    $("#form-fields").innerHTML = fields.map((f) => f.type === "checkbox"
+    $("#form-title").textContent = title; $("#form-submit").textContent = submit; $("#form-cancel").textContent = cancel; err.hidden = true;
+    $("#form-fields").innerHTML = (message ? `<p style="margin:0;font-size:14px;line-height:1.5">${message}</p>` : "") + fields.map((f) => f.type === "checkbox"
       ? `<label class="chk" style="color:var(--ink);font-weight:500;font-size:13px"><input type="checkbox" id="ff-${f.id}" ${f.value ? "checked" : ""}> ${esc(f.label)}${f.help ? ` <span class="hint">${esc(f.help)}</span>` : ""}</label>`
       : `<div><label for="ff-${f.id}">${esc(f.label)}</label><input class="fld${f.mono ? " mono" : ""}" id="ff-${f.id}" value="${esc(f.value || "")}" placeholder="${esc(f.placeholder || "")}">${f.help ? `<div class="help">${esc(f.help)}</div>` : ""}</div>`).join("");
     const values = () => Object.fromEntries(fields.map((f) => [f.id, f.type === "checkbox" ? $(`#ff-${f.id}`).checked : $(`#ff-${f.id}`).value.trim()]));
@@ -137,7 +139,7 @@ function renderIndexNotice() {
   el.hidden = false;
   const n = pending.length;
   el.innerHTML = `<span>⚠ ${n} source${n > 1 ? "s" : ""} in your enabled bundles ${n > 1 ? "are" : "is"} not indexed yet, so the assistant cannot read ${n > 1 ? "them" : "it"}: <b>${pending.slice(0, 3).map((s) => esc(s.location)).join("</b>, <b>")}</b>${n > 3 ? "…" : ""}</span><span class="sp"></span><button class="btn sm pri" id="notice-index">Index now</button>`;
-  $("#notice-index").onclick = guard(async () => { for (const s of pending) await api(`/api/sources/${s.id}/index`, { method: "POST" }); toast("Indexing started."); el.hidden = true; });
+  $("#notice-index").onclick = guard(async () => { if (!(await ensureModelReady())) return; for (const s of pending) await api(`/api/sources/${s.id}/index`, { method: "POST" }); toast("Indexing started."); el.hidden = true; });
 }
 
 // ---------------------------------------------------------------- privacy badge
@@ -298,6 +300,18 @@ function srcMeta(s) {
   if (s.status === "pending") return `<span class="pill">not indexed</span>`;
   return `<span class="pill ok">${s.doc_count} ${s.kind === "website" ? "pages" : "files"}</span> ${s.last_indexed_at ? `<span class="meta">${fmtWhen(s.last_indexed_at)}</span>` : ""}${s.last_error ? ` <span class="meta err" title="${esc(s.last_error)}">⚠</span>` : ""}`;
 }
+/** Before any indexing starts: a quick "hello" to the embedding model. If it
+ * fails, an error window says what to set up and nothing is queued. */
+async function ensureModelReady() {
+  const r = await api("/api/index/ready");
+  if (r.ok) return true;
+  const p = state.config.models.providers[state.config.models.active];
+  const v = await formDialog({ title: "No model is connected", submit: "Open Settings → Models", cancel: "Close",
+    message: `Indexing needs a working model, and the current one — <b>${esc(p.label)}</b>${p.embedding_model ? ` (${esc(p.embedding_model)})` : ""} — did not answer:<br><br><i>${esc(r.error)}</i><br><br>Configure a model before indexing anything: pick a provider with an embedding model in Settings → Models (Ollama with <code>nomic-embed-text</code>, or OpenAI with an API key) and check that its status says Connected.`,
+    onSubmit: async () => {} });
+  if (v) { state.sec = "models"; $$("#smenu button").forEach((x) => x.classList.toggle("on", x.dataset.sec === "models")); showView("settings"); }
+  return false;
+}
 async function renderReadyNotice() {
   const el = $("#ready-notice"); if (!el) return;
   try {
@@ -319,9 +333,9 @@ function renderSources() {
     <div class="docs" id="docs-${b.id}" hidden></div></div>`).join("");
   $$("[data-toggle]", el).forEach((t) => t.addEventListener("click", guard(async () => { await api(`/api/bundles/${t.dataset.toggle}`, { method: "PATCH", body: { enabled: !t.classList.contains("on") } }); await refresh(); renderSources(); })));
   $$("[data-rename]", el).forEach((i) => i.addEventListener("change", guard(async () => { await api(`/api/bundles/${i.dataset.rename}`, { method: "PATCH", body: { name: i.value } }); await refresh(); })));
-  $$("[data-addpath]", el).forEach((b) => b.addEventListener("click", guard(async () => { const p = await browse(); if (!p) return; await api(`/api/bundles/${b.dataset.addpath}/sources`, { method: "POST", body: { kind: "path", location: p.path, index: p.index } }); toast(p.index ? "Added — indexing has started." : "Added. Click Index on it when you are ready."); await refresh(); renderSources(); })));
+  $$("[data-addpath]", el).forEach((b) => b.addEventListener("click", guard(async () => { const p = await browse(); if (!p) return; const ready = p.index ? await ensureModelReady() : false; await api(`/api/bundles/${b.dataset.addpath}/sources`, { method: "POST", body: { kind: "path", location: p.path, index: ready } }); toast(ready ? "Added — indexing has started." : "Added. Click Index on it when you are ready."); await refresh(); renderSources(); })));
   $$("[data-addweb]", el).forEach((b) => b.addEventListener("click", guard(() => addWebsite(b.dataset.addweb))));
-  $$("[data-reindex]", el).forEach((b) => b.addEventListener("click", guard(async () => { b.disabled = true; b.innerHTML = `<span class="spin"></span>Starting…`; await api(`/api/sources/${b.dataset.reindex}/index`, { method: "POST" }); })));
+  $$("[data-reindex]", el).forEach((b) => b.addEventListener("click", guard(async () => { if (!(await ensureModelReady())) return; b.disabled = true; b.innerHTML = `<span class="spin"></span>Starting…`; await api(`/api/sources/${b.dataset.reindex}/index`, { method: "POST" }); })));
   $$("[data-delsrc]", el).forEach((b) => b.addEventListener("click", guard(async () => { if (!confirm("Remove this source and everything indexed from it?")) return; await api(`/api/sources/${b.dataset.delsrc}`, { method: "DELETE" }); await refresh(); renderSources(); })));
   $$("[data-delbundle]", el).forEach((b) => b.addEventListener("click", guard(async () => { if (!confirm("Delete this bundle, its sources and everything indexed from them?")) return; await api(`/api/bundles/${b.dataset.delbundle}`, { method: "DELETE" }); await refresh(); renderSources(); })));
   $$("[data-docs]", el).forEach((b) => b.addEventListener("click", guard(async () => { const box = $(`#docs-${b.dataset.docs}`); if (!box.hidden) { box.hidden = true; return; } const docs = await api(`/api/bundles/${b.dataset.docs}/documents`); box.hidden = false;
@@ -539,10 +553,10 @@ async function renderSettings() {
   $("#w-save") && ($("#w-save").onclick = guard(async () => { await api("/api/settings", { method: "PUT", body: { indexing: { websites: { max_pages_per_site: Number($("#w-cap").value), max_depth: Number($("#w-depth").value), recheck_hours: Number($("#w-hours").value), delay_ms: Number($("#w-delay").value), respect_robots: $("#w-robots").checked } } } }); toast("Saved."); await renderSettings(); }));
   $("#g-save") && ($("#g-save").onclick = guard(async () => { const r = await api("/api/settings", { method: "PUT", body: { server: { port: Number($("#g-port").value), host: $("#g-host").value, open_browser: $("#g-open").checked }, data_dir: $("#g-data").value.trim() } }); toast(r.changed_now.length ? "Saved — restart to apply " + r.changed_now.join(", ") : "Saved."); await renderSettings(); }));
   $("#g-reload") && ($("#g-reload").onclick = guard(async () => { await api("/api/settings/reload", { method: "POST" }); await refresh(); await renderSettings(); toast("config.json reloaded."); }));
-  $("#ix-files") && ($("#ix-files").onclick = guard(async () => { await api("/api/index/files", { method: "POST", body: {} }); toast("Re-indexing files."); }));
-  $("#ix-web") && ($("#ix-web").onclick = guard(async () => { await api("/api/index/websites", { method: "POST", body: {} }); toast("Re-checking websites."); }));
+  $("#ix-files") && ($("#ix-files").onclick = guard(async () => { if (!(await ensureModelReady())) return; await api("/api/index/files", { method: "POST", body: {} }); toast("Re-indexing files."); }));
+  $("#ix-web") && ($("#ix-web").onclick = guard(async () => { if (!(await ensureModelReady())) return; await api("/api/index/websites", { method: "POST", body: {} }); toast("Re-checking websites."); }));
   $$("#ix-stop, #ix-stop2").forEach((b) => (b.onclick = guard(async () => { await api("/api/index/stop", { method: "POST" }); toast("Stopping after the current item."); })));
-  $$("[data-reindex]", pane).forEach((b) => (b.onclick = guard(async () => { await api(`/api/sources/${b.dataset.reindex}/index`, { method: "POST" }); toast("Queued."); })));
+  $$("[data-reindex]", pane).forEach((b) => (b.onclick = guard(async () => { if (!(await ensureModelReady())) return; await api(`/api/sources/${b.dataset.reindex}/index`, { method: "POST" }); toast("Queued."); })));
 }
 
 // ---------------------------------------------------------------- views
@@ -571,8 +585,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#import-file").addEventListener("change", guard(async (e) => { if (e.target.files[0]) await importSessionFile(e.target.files[0]); e.target.value = ""; }));
   $("#new-session-btn").addEventListener("click", () => loadSessionIntoUi(newSessionObject()));
   $$("#new-bundle-btn, #new-bundle-btn2").forEach((b) => b.addEventListener("click", guard(newBundle)));
-  $("#index-files-btn").addEventListener("click", guard(async () => { await api("/api/index/files", { method: "POST", body: {} }); toast("Re-indexing files."); }));
-  $("#index-web-btn").addEventListener("click", guard(async () => { await api("/api/index/websites", { method: "POST", body: {} }); toast("Re-checking websites."); }));
+  $("#index-files-btn").addEventListener("click", guard(async () => { if (!(await ensureModelReady())) return; await api("/api/index/files", { method: "POST", body: {} }); toast("Re-indexing files."); }));
+  $("#index-web-btn").addEventListener("click", guard(async () => { if (!(await ensureModelReady())) return; await api("/api/index/websites", { method: "POST", body: {} }); toast("Re-checking websites."); }));
   $("#new-persona-btn").addEventListener("click", () => editPersona({ id: null, name: "", description: "", prompt: "", builtin: false }, true));
   $$("#smenu button").forEach((b) => b.addEventListener("click", () => { state.sec = b.dataset.sec; $$("#smenu button").forEach((x) => x.classList.toggle("on", x === b)); renderSettings().catch((e) => toast(e.message)); }));
   try { await refresh(); } catch (e) { toast("Could not reach the server: " + e.message, 8000); return; }
