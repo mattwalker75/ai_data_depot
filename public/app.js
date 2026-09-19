@@ -304,13 +304,13 @@ function renderSources() {
   el.innerHTML = state.bundles.map((b) => `<div class="card" data-bundle="${b.id}">
     <div class="ct"><button class="toggle ${b.enabled ? "on" : ""}" data-toggle="${b.id}" title="${b.enabled ? "On — the assistant may read this bundle" : "Off"}" aria-label="Enable bundle"></button><input class="session-name" data-rename="${b.id}" value="${esc(b.name)}" aria-label="Bundle name"><span class="sp"></span>
       <button class="btn sm" data-addpath="${b.id}">+ Folder or file</button><button class="btn sm" data-addweb="${b.id}">+ Website</button><button class="btn sm" data-docs="${b.id}">Documents</button><button class="btn sm danger" data-delbundle="${b.id}">Delete</button></div>
-    ${b.sources.length ? b.sources.map((s) => `<div class="srcline"><span class="k">${s.kind === "website" ? "website" : "folder"}</span><span class="loc" title="${esc(s.location)}">${esc(s.location)}</span>${srcMeta(s)}<button class="btn sm ${s.status === "pending" ? "pri" : ""}" data-reindex="${s.id}">${s.status === "pending" ? "Index" : s.kind === "website" ? "Re-check" : "Re-index"}</button><button class="btn sm danger" data-delsrc="${s.id}">Remove</button></div>`).join("") : `<div class="hint">No sources yet — add a folder, a file, or a website.</div>`}
+    ${b.sources.length ? b.sources.map((s) => `<div class="srcline ${s.status === "indexing" ? "busy" : ""}" data-loc="${esc(s.location)}"><span class="k">${s.kind === "website" ? "website" : "folder"}</span><span class="loc" title="${esc(s.location)}">${esc(s.location)}</span>${srcMeta(s)}<button class="btn sm ${s.status === "pending" ? "pri" : ""}" data-reindex="${s.id}" data-label="${s.status === "pending" ? "Index" : s.kind === "website" ? "Re-check" : "Re-index"}" ${s.status === "indexing" ? "disabled" : ""}>${s.status === "indexing" ? `<span class="spin"></span>Indexing…` : s.status === "pending" ? "Index" : s.kind === "website" ? "Re-check" : "Re-index"}</button><button class="btn sm danger" data-delsrc="${s.id}">Remove</button></div>`).join("") : `<div class="hint">No sources yet — add a folder, a file, or a website.</div>`}
     <div class="docs" id="docs-${b.id}" hidden></div></div>`).join("");
   $$("[data-toggle]", el).forEach((t) => t.addEventListener("click", guard(async () => { await api(`/api/bundles/${t.dataset.toggle}`, { method: "PATCH", body: { enabled: !t.classList.contains("on") } }); await refresh(); renderSources(); })));
   $$("[data-rename]", el).forEach((i) => i.addEventListener("change", guard(async () => { await api(`/api/bundles/${i.dataset.rename}`, { method: "PATCH", body: { name: i.value } }); await refresh(); })));
   $$("[data-addpath]", el).forEach((b) => b.addEventListener("click", guard(async () => { const p = await browse(); if (!p) return; await api(`/api/bundles/${b.dataset.addpath}/sources`, { method: "POST", body: { kind: "path", location: p.path, index: p.index } }); toast(p.index ? "Added — indexing has started." : "Added. Click Index on it when you are ready."); await refresh(); renderSources(); })));
   $$("[data-addweb]", el).forEach((b) => b.addEventListener("click", guard(() => addWebsite(b.dataset.addweb))));
-  $$("[data-reindex]", el).forEach((b) => b.addEventListener("click", guard(async () => { await api(`/api/sources/${b.dataset.reindex}/index`, { method: "POST" }); toast("Queued."); })));
+  $$("[data-reindex]", el).forEach((b) => b.addEventListener("click", guard(async () => { b.disabled = true; b.innerHTML = `<span class="spin"></span>Starting…`; await api(`/api/sources/${b.dataset.reindex}/index`, { method: "POST" }); })));
   $$("[data-delsrc]", el).forEach((b) => b.addEventListener("click", guard(async () => { if (!confirm("Remove this source and everything indexed from it?")) return; await api(`/api/sources/${b.dataset.delsrc}`, { method: "DELETE" }); await refresh(); renderSources(); })));
   $$("[data-delbundle]", el).forEach((b) => b.addEventListener("click", guard(async () => { if (!confirm("Delete this bundle, its sources and everything indexed from them?")) return; await api(`/api/bundles/${b.dataset.delbundle}`, { method: "DELETE" }); await refresh(); renderSources(); })));
   $$("[data-docs]", el).forEach((b) => b.addEventListener("click", guard(async () => { const box = $(`#docs-${b.dataset.docs}`); if (!box.hidden) { box.hidden = true; return; } const docs = await api(`/api/bundles/${b.dataset.docs}/documents`); box.hidden = false;
@@ -351,11 +351,29 @@ function browse() {
     go(cur).then(() => dlg.showModal()).catch((e) => { toast(e.message); resolve(null); });
   });
 }
-// index progress (SSE)
+// index progress (SSE): the job bar shows in every view; the source row
+// being worked on is marked too, so clicking Index has a visible effect.
 function showJob(j) {
-  const strip = $("#idx-strip");
-  if (!j || j.status === "done" || j.status === "failed" || j.status === "stopped") { strip.hidden = true; if (j) { toast(j.status === "failed" ? `Indexing failed: ${j.error}` : `${j.target}: ${j.message || j.status}`, 5000); } refresh().then(() => state.view === "sources" && renderSources()).catch(() => {}); return; }
-  strip.hidden = false; const pct = j.total ? Math.round((j.done / j.total) * 100) : 0; $("#idx-fill").style.width = pct + "%"; $("#idx-msg").textContent = `${j.kind === "website" ? "Reading" : "Indexing"} ${j.target}${j.total ? ` — ${j.done}/${j.total}` : ""}${j.message ? " · " + j.message : ""}`;
+  const strip = $("#idx-strip"), bar = $("#jobbar");
+  const finished = !j || ["done", "failed", "stopped"].includes(j.status);
+  if (finished) {
+    strip.hidden = true; bar.hidden = true;
+    if (j) toast(j.status === "failed" ? `Indexing failed: ${j.error}` : `${j.target}: ${j.message || j.status}`, 6000);
+    refresh().then(() => state.view === "sources" && renderSources()).catch(() => {});
+    return;
+  }
+  const pct = j.total ? Math.round((j.done / j.total) * 100) : 0;
+  const verb = j.kind === "website" ? "Reading" : "Indexing";
+  bar.hidden = false; $("#jb-title").textContent = `${verb} ${j.target}${j.total ? ` — ${j.done} of ${j.total}` : j.status === "queued" ? " — queued" : ""}`;
+  $("#jb-detail").textContent = j.message || ""; $("#jb-fill").style.width = pct + "%";
+  strip.hidden = false; $("#idx-fill").style.width = pct + "%"; $("#idx-msg").textContent = `${verb} ${j.target}${j.total ? ` — ${j.done}/${j.total}` : ""}${j.message ? " · " + j.message : ""}`;
+  // mark the matching source row(s) on the Sources page
+  $$(".srcline[data-loc]").forEach((row) => {
+    const busy = String(j.target).startsWith(row.dataset.loc);
+    row.classList.toggle("busy", busy);
+    const btn = row.querySelector("[data-reindex]");
+    if (btn) { if (busy) { btn.disabled = true; btn.innerHTML = `<span class="spin"></span>Indexing…`; } else if (btn.disabled) { btn.disabled = false; btn.textContent = btn.dataset.label || "Re-index"; } }
+  });
 }
 function wireIndexEvents() { const es = new EventSource("/api/index/events"); es.addEventListener("job", (e) => showJob(JSON.parse(e.data))); es.onerror = () => {}; }
 
@@ -521,6 +539,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#import-file").addEventListener("change", guard(async (e) => { if (e.target.files[0]) await importSessionFile(e.target.files[0]); e.target.value = ""; }));
   $("#new-session-btn").addEventListener("click", () => loadSessionIntoUi(newSessionObject()));
   $$("#new-bundle-btn, #new-bundle-btn2").forEach((b) => b.addEventListener("click", guard(newBundle)));
+  $("#jb-stop").addEventListener("click", guard(async () => { await api("/api/index/stop", { method: "POST" }); $("#jb-detail").textContent = "Stopping after the current item…"; }));
   $("#index-files-btn").addEventListener("click", guard(async () => { await api("/api/index/files", { method: "POST", body: {} }); toast("Re-indexing files."); }));
   $("#index-web-btn").addEventListener("click", guard(async () => { await api("/api/index/websites", { method: "POST", body: {} }); toast("Re-checking websites."); }));
   $("#new-persona-btn").addEventListener("click", () => editPersona({ id: null, name: "", description: "", prompt: "", builtin: false }, true));

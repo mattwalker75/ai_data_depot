@@ -4,6 +4,22 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 
 ## [Unreleased]
 
+### Fixed
+- 2026-09-19: **Indexing had no visible progress** once the drawers were made
+  Chat-only — clicking Index or Re-index produced a "Queued" toast and nothing
+  else. A job bar now runs across the top of every view (what is being
+  indexed, N of M, the current file, a progress bar, Stop), the source's own
+  row shows a spinner with its button disabled while it runs, and the click
+  itself gives immediate feedback.
+- 2026-09-19: **The log was buried in pdf.js and OCR chatter** (glyph-path
+  warnings, "translateFont failed: cMapUrl", `Filter "Crypt"`, "Image too
+  small to scale"). pdf.js now runs at errors-only verbosity and is pointed at
+  the character maps and standard fonts it ships (which also lets it render
+  those glyphs); Tesseract's own messages go to its debug file. A document
+  with no readable text at all (encrypted, or image-only with OCR off) is now
+  a proper per-document error in the Documents list instead of a silent
+  empty entry.
+
 ### Changed
 - 2026-09-19: **Round-2 UI tweaks.** (1) The Reading-from and Evidence drawers
   now belong to Chat only — Sources, Personas, Sessions and Settings use the

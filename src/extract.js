@@ -19,6 +19,10 @@ function supported(file) { return Object.prototype.hasOwnProperty.call(MIME, pat
 
 let pdfjsPromise = null;
 function pdfjs() { return (pdfjsPromise ||= import("pdfjs-dist/legacy/build/pdf.mjs")); }
+// pdf.js ships the CJK character maps and the 14 standard fonts; pointing it
+// at them stops the "translateFont failed" warnings and renders those glyphs.
+const PDFJS_DIR = path.dirname(require.resolve("pdfjs-dist/package.json"));
+const PDF_OPTS = { cMapUrl: path.join(PDFJS_DIR, "cmaps") + "/", cMapPacked: true, standardFontDataUrl: path.join(PDFJS_DIR, "standard_fonts") + "/", useSystemFonts: true, isEvalSupported: false };
 
 let tessWorker = null;
 async function ocrImage(png) {
@@ -26,7 +30,10 @@ async function ocrImage(png) {
     const { createWorker } = require("tesseract.js");
     const cache = path.join(config.dataDir(), "tessdata");
     fs.mkdirSync(cache, { recursive: true });
-    tessWorker = await createWorker("eng", 1, { cachePath: cache, logger: () => {} });
+    tessWorker = await createWorker("eng", 1, { cachePath: cache, logger: () => {}, errorHandler: () => {} });
+    // Tesseract's own chatter ("Image too small to scale", "Line cannot be
+    // recognized") goes to its debug file, not our log.
+    try { await tessWorker.setParameters({ debug_file: "/dev/null" }); } catch {}
   }
   const { data } = await tessWorker.recognize(png);
   return data.text || "";
@@ -34,7 +41,9 @@ async function ocrImage(png) {
 
 async function fromPdf(buffer, { ocr, ocrMinChars }) {
   const lib = await pdfjs();
-  const doc = await lib.getDocument({ data: new Uint8Array(buffer), useSystemFonts: true, isEvalSupported: false }).promise;
+  // verbosity ERRORS: pdf.js warns per glyph while rendering pages for OCR,
+  // which buried real problems under hundreds of lines.
+  const doc = await lib.getDocument({ data: new Uint8Array(buffer), verbosity: lib.VerbosityLevel.ERRORS, ...PDF_OPTS }).promise;
   const pages = []; let ocrPages = 0;
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);
@@ -132,6 +141,12 @@ async function extractFile(file) {
   }
   base.pages = r.pages.filter((p) => p && p.text && p.text.trim());
   base.page_count = r.pages.length;
+  if (!base.pages.length) {
+    const f = config.get().indexing.files;
+    throw new Error(ext === ".pdf"
+      ? (f.ocr ? "No readable text — the PDF is empty, encrypted, or its pages could not be read even with OCR" : "No readable text — probably a scanned PDF; turn on OCR in Settings → Indexing · Files")
+      : "No readable text in the file");
+  }
   return base;
 }
 
