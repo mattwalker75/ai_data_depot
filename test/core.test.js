@@ -12,12 +12,14 @@ const config = require("../src/config");
 config.load(); config.update({ data_dir: path.join(scratch, "data") });
 
 test("config: defaults merge under an edited file, keys mask and unmask", () => {
-  config.update({ models: { providers: { openai: { api_key: "sk-secret-1234" } } } });
+  config.update({ models: { providers: { openai: { api_key: "sk-proj-abcdefghijklmnop-98765" } } } });
   const red = config.redacted();
-  assert.equal(red.models.providers.openai.api_key, "••••1234");
+  assert.equal(red.models.providers.openai.api_key, "sk-pr••••••••98765", "first 5 and last 5 visible, nothing usable");
+  assert.equal(config.maskKey("short"), "••••••••rt");
   assert.equal(red.models.providers.ollama.base_url, "http://localhost:11434/v1", "untouched defaults survive");
-  const patch = config.unmaskKeys({ models: { providers: { openai: { api_key: "••••1234", chat_model: "gpt-x" } } } });
-  assert.equal(patch.models.providers.openai.api_key, "sk-secret-1234", "a masked key means unchanged");
+  const patch = config.unmaskKeys({ models: { providers: { openai: { api_key: "sk-pr••••••••98765", chat_model: "gpt-x" } } } });
+  assert.equal(patch.models.providers.openai.api_key, "sk-proj-abcdefghijklmnop-98765", "a masked key means unchanged");
+  assert.equal(config.unmaskKeys({ models: { providers: { openai: { api_key: "sk-new" } } } }).models.providers.openai.api_key, "sk-new", "a new key is taken as typed");
   const r = config.update({ server: { port: 8311 } });
   assert.deepEqual(r.restart_required, ["server.port"]);
   assert.deepEqual(config.update({ server: { port: 8311 } }).restart_required, [], "no change, no restart");

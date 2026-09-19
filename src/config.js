@@ -108,12 +108,18 @@ function dataDir() {
   return abs;
 }
 
+/** A key as the UI shows it: first 5 and last 5 characters, dots between —
+ * enough to recognise which key it is, never enough to use it. */
+function maskKey(key) {
+  const k = String(key || ""); if (!k) return "";
+  return k.length > 14 ? k.slice(0, 5) + "••••••••" + k.slice(-5) : "••••••••" + k.slice(-2);
+}
+function isMasked(value) { return typeof value === "string" && value.includes("••••"); }
+
 /** The config as the UI may see it: API keys masked. */
 function redacted() {
   const cfg = JSON.parse(JSON.stringify(get()));
-  for (const p of Object.values(cfg.models.providers)) {
-    if (p.api_key) p.api_key = "••••" + String(p.api_key).slice(-4);
-  }
+  for (const p of Object.values(cfg.models.providers)) if (p.api_key) p.api_key = maskKey(p.api_key);
   return cfg;
 }
 
@@ -123,11 +129,11 @@ function unmaskKeys(patch) {
   if (!providers) return patch;
   const cur = get().models.providers;
   for (const [name, p] of Object.entries(providers)) {
-    if (p && typeof p.api_key === "string" && p.api_key.startsWith("••••") && cur[name]) p.api_key = cur[name].api_key;
+    if (p && isMasked(p.api_key) && cur[name]) p.api_key = cur[name].api_key;
   }
   return patch;
 }
 
 function expandHome(p) { return p && p.startsWith("~") ? path.join(os.homedir(), p.slice(1)) : p; }
 
-module.exports = { DEFAULTS, RESTART_REQUIRED, CONFIG_PATH, ROOT, load, get, save, update, dataDir, redacted, unmaskKeys, deepMerge, expandHome };
+module.exports = { maskKey, isMasked, DEFAULTS, RESTART_REQUIRED, CONFIG_PATH, ROOT, load, get, save, update, dataDir, redacted, unmaskKeys, deepMerge, expandHome };

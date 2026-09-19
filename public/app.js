@@ -116,6 +116,22 @@ async function addWebsite(bundleId) {
   if (v.index) { if (await ensureModelReady()) { const src = state.bundles.flatMap((b) => b.sources).find((x) => x.location === v.url || x.location === "https://" + v.url); if (src) await api(`/api/sources/${src.id}/index`, { method: "POST" }); toast("Added — reading the site now."); } }
   else toast("Added. Click Index on it when you are ready.");
 }
+/** Pick one item from a list in a sub-window. The search box starts EMPTY so
+ * the whole list shows; typing narrows it. Resolves with the item or null. */
+function pickFromList({ title, items, current = "", hint = "" }) {
+  return new Promise((resolve) => {
+    const dlg = $("#pick-dialog"), list = $("#pick-list"), search = $("#pick-search");
+    $("#pick-title").textContent = title; $("#pick-hint").textContent = hint; search.value = "";
+    let done = false; const finish = (v) => { if (done) return; done = true; if (dlg.open) dlg.close(); resolve(v); };
+    const render = () => { const q = search.value.trim().toLowerCase(); const shown = items.filter((m) => !q || m.toLowerCase().includes(q));
+      list.innerHTML = shown.map((m) => `<button type="button" data-m="${esc(m)}" class="${m === current ? "on" : ""}">${esc(m)}${m === current ? `<span class="cur">current</span>` : ""}</button>`).join("") || `<div class="hint" style="padding:12px">Nothing matches “${esc(search.value)}”.</div>`;
+      $$("button[data-m]", list).forEach((b) => (b.onclick = () => finish(b.dataset.m))); };
+    search.oninput = render; render();
+    $("#pick-cancel").onclick = () => finish(null); dlg.onclose = () => finish(null);
+    dlg.showModal(); search.focus();
+    const cur = list.querySelector("button.on"); if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: "center" });
+  });
+}
 /** Small modal form. Resolves with the values on submit, null on cancel; onSubmit may throw to show an error inline. */
 function formDialog({ title, fields = [], submit = "Save", cancel = "Cancel", message = "", onSubmit }) {
   return new Promise((resolve) => {
@@ -460,9 +476,9 @@ async function renderSettings() {
     const p = m.providers[m.active];
     html += `<div class="card"><div class="ct">Provider</div><div class="prov">${Object.entries(m.providers).map(([k, v]) => `<button data-prov="${k}" class="${k === m.active ? "on" : ""}">${esc(v.label)}</button>`).join("")}</div>
       <div class="row" style="margin-top:10px"><label>Server / base URL</label><input class="fld mono" id="m-url" value="${esc(p.base_url)}"></div>
-      <div class="row"><label>API key</label><input class="fld mono" id="m-key" type="password" value="${esc(p.api_key)}" placeholder="${p.local ? "not needed for a local server" : "paste your key"}"></div>
-      <div class="row"><label>Chat model</label><span style="display:flex;gap:6px;max-width:520px"><input class="fld mono" id="m-chat" list="m-list" value="${esc(p.chat_model)}"><button class="btn sm" id="m-refresh" title="Ask the provider which models it offers">List models</button></span><datalist id="m-list"></datalist></div>
-      <div class="row"><label>Embedding model</label><input class="fld mono" id="m-emb" list="m-list" value="${esc(p.embedding_model)}" placeholder="${p.local ? "e.g. nomic-embed-text (ollama pull nomic-embed-text)" : "e.g. text-embedding-3-small"}"></div>
+      <div class="row"><label>API key</label><span style="max-width:520px"><input class="fld mono" id="m-key" type="text" spellcheck="false" autocomplete="off" value="${esc(p.api_key)}" placeholder="${p.local ? "not needed for a local server" : "paste your key"}"><div class="hint" style="margin-top:4px">${p.api_key ? "Saved key shown as its first 5 and last 5 characters. Paste a new one to replace it." : ""}</div></span></div>
+      <div class="row"><label>Chat model</label><span style="display:flex;gap:6px;max-width:520px"><input class="fld mono" id="m-chat" value="${esc(p.chat_model)}"><button class="btn sm" id="m-pick-chat" title="Choose from the models this provider offers">List models</button></span></div>
+      <div class="row"><label>Embedding model</label><span style="display:flex;gap:6px;max-width:520px"><input class="fld mono" id="m-emb" value="${esc(p.embedding_model)}" placeholder="${p.local ? "e.g. nomic-embed-text (ollama pull nomic-embed-text)" : "e.g. text-embedding-3-small"}"><button class="btn sm" id="m-pick-emb" title="Choose from the models this provider offers">List models</button></span></div>
       <div class="row"><label>Status</label><span class="status wait" id="m-status">Checking…</span></div>
       <div class="row wide" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri" id="m-save">Save</button><button class="btn" id="m-test">Test connection</button><span class="hint" style="align-self:center">${p.local ? "Local: your documents and questions never leave this computer." : "Cloud: questions and the matching passages are sent to " + esc(p.label) + "."}</span></div></div>
       <div class="card"><div class="ct">Answering</div>
@@ -525,7 +541,14 @@ async function renderSettings() {
   const saveModels = guard(async () => { const k = m.active; await api("/api/settings", { method: "PUT", body: { models: { active: k, providers: { [k]: { base_url: $("#m-url").value.trim(), api_key: $("#m-key").value, chat_model: $("#m-chat").value.trim(), embedding_model: $("#m-emb").value.trim() } }, context_chunks: Number($("#m-chunks").value), temperature: Number($("#m-temp").value), max_tokens: Number($("#m-max").value) }, chat: { show_reasoning_ledger: $("#m-ledger").checked, not_found_phrase: $("#m-nf").value.trim() || "Not in your sources" } } }); toast("Saved."); await renderSettings(); renderPrivacy(); });
   $("#m-save") && ($("#m-save").onclick = saveModels); $("#m-save2") && ($("#m-save2").onclick = saveModels);
   $("#m-test") && ($("#m-test").onclick = guard(async () => { await saveModels(); }));
-  $("#m-refresh") && ($("#m-refresh").onclick = guard(async () => { const r = await api(`/api/models/list`); $("#m-list").innerHTML = r.models.map((x) => `<option value="${esc(x)}">`).join(""); toast(`${r.models.length} models listed — pick from the field's dropdown.`); }));
+  const pickModel = (fieldId, what) => guard(async () => {
+    const r = await api(`/api/models/list`);
+    if (!r.models.length) throw new Error(`${p.label} did not list any models. Check the server address and key, or type the model name.`);
+    const chosen = await pickFromList({ title: `${what} — ${p.label}`, items: r.models, current: $(fieldId).value.trim(), hint: `${r.models.length} models offered by ${p.label}` });
+    if (chosen) { $(fieldId).value = chosen; toast(`${what}: ${chosen} — click Save to keep it.`); }
+  });
+  $("#m-pick-chat") && ($("#m-pick-chat").onclick = pickModel("#m-chat", "Chat model"));
+  $("#m-pick-emb") && ($("#m-pick-emb").onclick = pickModel("#m-emb", "Embedding model"));
   if ($("#m-status")) { api("/api/models/status").then((st) => { const el = $("#m-status"); if (!st.reachable) { el.className = "status bad"; el.textContent = `Not reachable — ${st.error}`; return; } const parts = [`Connected${st.models.length ? ` — ${st.models.length} models available` : ""}`]; if (st.chat_model_found === false) parts.push(`chat model “${st.chat_model}” not found`); if (st.embedding_model_found === false) parts.push(`embedding model “${st.embedding_model}” not found`); if (!st.embedding_model) parts.push("no embedding model set — indexing will use the fallback provider"); el.className = "status " + (parts.length > 1 ? "bad" : "ok"); el.textContent = parts.join(" · "); }).catch((e) => { $("#m-status").className = "status bad"; $("#m-status").textContent = e.message; }); }
   $$("[data-theme]", pane).forEach((b) => b.addEventListener("click", guard(async () => { await api("/api/settings", { method: "PUT", body: { appearance: { theme: b.dataset.theme } } }); state.config.appearance.theme = b.dataset.theme; applyTheme(b.dataset.theme); await renderSettings(); })));
   if ($("#theme-editor")) {

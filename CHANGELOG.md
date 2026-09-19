@@ -4,6 +4,15 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 
 ## [Unreleased]
 
+### Changed
+- 2026-09-19: Settings → Models: a saved API key is shown as its first 5 and
+  last 5 characters (`sk-pr••••••••a1b2c`) so you can tell which key it is;
+  pasting a new one replaces it. "List models" now opens a sub-window with
+  every model the provider offers and a search box that starts empty (the old
+  dropdown only showed models matching what was already typed); there is one
+  beside the chat model and one beside the embedding model, and clicking a
+  model fills the field.
+
 ### Fixed
 - 2026-09-19: After the first chat message, any refresh of the page state
   (adding a source, toggling a bundle) failed with "null is not an object

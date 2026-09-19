@@ -116,6 +116,15 @@
     <div class="df"><label class="chk" id="browse-index-wrap"><input type="checkbox" id="browse-index"> Index right away <span class="hint">— until a source is indexed, the assistant cannot read it</span></label><div class="sp"></div><button type="button" class="btn" id="browse-cancel">Cancel</button><button type="button" class="btn pri" id="browse-choose">Use this folder</button></div>
   </form>
 </dialog>
+<!-- pick one item from a list (models) -->
+<dialog id="pick-dialog" class="dialog">
+  <form method="dialog" class="dcard">
+    <div class="dh"><b id="pick-title"></b><button class="x" value="cancel" aria-label="Close">✕</button></div>
+    <div class="dpath"><input class="fld pathin" id="pick-search" placeholder="Type to narrow the list…" aria-label="Search"></div>
+    <div class="dlist picklist" id="pick-list"></div>
+    <div class="df"><span class="hint" id="pick-hint"></span><div class="sp"></div><button type="button" class="btn" id="pick-cancel">Cancel</button></div>
+  </form>
+</dialog>
 <!-- generic small form (new bundle, add website) -->
 <dialog id="form-dialog" class="dialog">
   <form method="dialog" class="dcard" id="form-dialog-form">
