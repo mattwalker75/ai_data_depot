@@ -23,6 +23,12 @@
 #   -c, --check     Only report what is installed / missing; change nothing.
 #   -h, --help      This help.
 #
+# Examples:
+#   ./INSTALL_APP.sh                        plain install: cloud provider, no local models
+#   ./INSTALL_APP.sh --ollama               install + local models (nomic-embed-text and qwen3:8b)
+#   ./INSTALL_APP.sh -o -m gemma4:26b -y    local models with a bigger chat model, no prompts
+#   ./INSTALL_APP.sh --check                just tell me what is missing
+#
 # Re-run any time (after pulling new code, for example). Safe to repeat.
 # Then:  ./DEPOT.sh --start
 #

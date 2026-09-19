@@ -17,6 +17,14 @@
 #
 # Bare words work too:  ./DEPOT.sh start | stop | restart | status | logs | fg | check | test
 #
+# Examples:
+#   ./DEPOT.sh                 start it (same as --start) and open the browser
+#   ./DEPOT.sh -c              see whether Node, the packages, config.json and Ollama are in place
+#   ./DEPOT.sh --restart       apply a new port or host from config.json
+#   ./DEPOT.sh -x -s           stop, then start, in one go
+#   ./DEPOT.sh --logs          watch what the server is doing (Ctrl-C to leave)
+#   ./DEPOT.sh -t              run the unit tests
+#
 # Configuration is config.json next to this script (Settings in the app edits
 # the same file). Port and host changes take effect after --restart.
 # First-time setup on a fresh machine:  ./INSTALL_APP.sh
