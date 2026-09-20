@@ -28,7 +28,8 @@ the only intended client, but everything is callable with `curl` from the same m
 | `GET /api/chunks/:id` | one passage (used by the Evidence drawer) |
 | `GET /api/documents?q=&bundle_ids=` | indexed documents of the enabled (or given) bundles — the "ask about one document" picker |
 | `GET /api/documents/:id` | one document's title, locator, kind, bundle |
-| `GET /api/documents/:id/page/:n?chunk=` | a PDF page rendered to PNG (`image` data URI, `width`, `height`, `pages`) plus `boxes` outlining the text of chunk `chunk` on that page; indexed PDF files only |
+| `GET /api/documents/:id/file` | the indexed PDF itself (PDF files only), streamed inline — the Evidence drawer renders pages from it in the browser with pdf.js (served from `/vendor/pdfjs/`) |
+| `GET /api/documents/:id/page/:n?chunk=` | a PDF page rendered to PNG (`image` data URI, `width`, `height`, `pages`) plus `boxes` outlining the text of chunk `chunk` on that page; indexed PDF files only. Server-side fallback used only when the browser cannot load pdf.js |
 
 ## Files
 

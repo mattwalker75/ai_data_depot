@@ -414,21 +414,79 @@ function showCitation(c, all) {
   $("#ev-focus").onclick = () => { setFocus({ id: c.document_id, title: c.title, kind: c.kind, locator: c.locator }); toast(`Asking about ${c.title} only.`); $("#composer").focus(); };
   if (pageNo) renderPdfPage(c, pageNo);
 }
-/** Fetch a rendered PDF page for the Evidence drawer and overlay the highlight boxes; ‹ › walk the document's pages (highlights only on the cited one). */
+/**
+ * The Evidence page view. The page is rendered HERE, in the browser, with
+ * pdf.js: a PDF that relies on fonts it does not embed (Word's Calibri,
+ * Tahoma…) draws correctly only where those fonts exist, and that is the
+ * user's machine, not the server. Highlight boxes come from the page's text
+ * items matched by word overlap against the cited passage. If pdf.js cannot
+ * be loaded the server renders the page instead (standard fonts only).
+ */
+const pdfDocs = new Map();
+async function pdfjsLib() {
+  if (!pdfjsLib.p) pdfjsLib.p = import("/vendor/pdfjs/build/pdf.min.mjs").then((lib) => { lib.GlobalWorkerOptions.workerSrc = "/vendor/pdfjs/build/pdf.worker.min.mjs"; return lib; });
+  return pdfjsLib.p;
+}
+async function pdfDocFor(documentId) {
+  if (pdfDocs.has(documentId)) return pdfDocs.get(documentId);
+  const lib = await pdfjsLib();
+  const doc = await lib.getDocument({ url: `/api/documents/${documentId}/file`, cMapUrl: "/vendor/pdfjs/cmaps/", cMapPacked: true, standardFontDataUrl: "/vendor/pdfjs/standard_fonts/" }).promise;
+  if (pdfDocs.size >= 4) { const [k, v] = pdfDocs.entries().next().value; pdfDocs.delete(k); v.destroy().catch(() => {}); }
+  pdfDocs.set(documentId, doc); return doc;
+}
+/** Text items whose words mostly appear in the excerpt (same rule as the server's renderPdfPage). */
+function highlightBoxes(items, viewport, excerpt) {
+  const words = (t) => String(t).toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}'’.-]{2,}/gu) || [];
+  const ex = new Set(words(excerpt)); if (!ex.size) return [];
+  const list = items.filter((it) => it.str && it.str.trim());
+  const score = list.map((it) => { const w = words(it.str); return w.length ? { n: w.length, r: w.filter((x) => ex.has(x)).length / w.length } : null; });
+  const hit = score.map((sc) => sc && sc.r >= 0.6 && (sc.n >= 3 || sc.r === 1));
+  const out = [];
+  list.forEach((it, i) => {
+    if (!hit[i] || !(score[i].n >= 3 || hit[i - 1] || hit[i + 1])) return;
+    const [x, y] = viewport.convertToViewportPoint(it.transform[4], it.transform[5]);
+    const h = Math.abs(it.height * viewport.scale) || 10, w = Math.abs(it.width * viewport.scale);
+    out.push({ x, y: y - h, w, h: h * 1.15 });
+  });
+  return out;
+}
 async function renderPdfPage(c, n) {
   const box = $("#ev-page"); if (!box) return;
   const my = (renderPdfPage.seq = (renderPdfPage.seq || 0) + 1);
+  const citedPage = Number((c.location.match(/^page (\d+)/) || [])[1]);
+  const wire = (page, pages) => {
+    $("#pg-label").textContent = `page ${page} of ${pages}`;
+    $("#pg-prev").disabled = page <= 1; $("#pg-next").disabled = page >= pages;
+    $("#pg-prev").onclick = () => { box.innerHTML = `<div class="ld">Rendering page ${page - 1}…</div>`; renderPdfPage(c, page - 1); };
+    $("#pg-next").onclick = () => { box.innerHTML = `<div class="ld">Rendering page ${page + 1}…</div>`; renderPdfPage(c, page + 1); };
+  };
+  const pct = (v, of) => (100 * v / of).toFixed(2) + "%";
   try {
-    const cited = n === Number((c.location.match(/^page (\d+)/) || [])[1]);
-    const r = await api(`/api/documents/${c.document_id}/page/${n}?` + (cited ? (c.chunk_id ? `chunk=${c.chunk_id}` : `text=${encodeURIComponent((c.excerpt || "").slice(0, 1500))}`) : ""));
+    const doc = await pdfDocFor(c.document_id);
+    const pageNo = Math.min(Math.max(1, n), doc.numPages);
+    const page = await doc.getPage(pageNo);
     if (my !== renderPdfPage.seq || !$("#ev-page")) return;
-    const pct = (v, of) => (100 * v / of).toFixed(2) + "%";
-    box.innerHTML = `<img src="${r.image}" alt="Page ${r.page} of ${esc(c.title)}" width="${r.width}" height="${r.height}">` + r.boxes.map((b) => `<div class="hl" style="left:${pct(b.x, r.width)};top:${pct(b.y, r.height)};width:${pct(b.w, r.width)};height:${pct(b.h, r.height)}"></div>`).join("");
-    $("#pg-label").textContent = `page ${r.page} of ${r.pages}`;
-    $("#pg-prev").disabled = r.page <= 1; $("#pg-next").disabled = r.page >= r.pages;
-    $("#pg-prev").onclick = () => { box.innerHTML = `<div class="ld">Rendering page ${r.page - 1}…</div>`; renderPdfPage(c, r.page - 1); };
-    $("#pg-next").onclick = () => { box.innerHTML = `<div class="ld">Rendering page ${r.page + 1}…</div>`; renderPdfPage(c, r.page + 1); };
-  } catch (e) { if (my === renderPdfPage.seq && $("#ev-page")) box.innerHTML = `<div class="ld">${esc(e.message)}</div>`; }
+    const cssW = Math.max(240, box.clientWidth || 480);
+    const base = page.getViewport({ scale: 1 }); const scale = cssW / base.width; const dpr = window.devicePixelRatio || 1;
+    const vp = page.getViewport({ scale: scale * dpr });
+    const canvas = document.createElement("canvas"); canvas.width = Math.ceil(vp.width); canvas.height = Math.ceil(vp.height); canvas.style.width = "100%"; canvas.style.display = "block";
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
+    if (my !== renderPdfPage.seq || !$("#ev-page")) return;
+    let boxes = [];
+    if (pageNo === citedPage) { const tc = await page.getTextContent(); boxes = highlightBoxes(tc.items, vp, c.excerpt || ""); }
+    box.innerHTML = ""; box.appendChild(canvas);
+    for (const b of boxes) { const d = document.createElement("div"); d.className = "hl"; d.style.cssText = `left:${pct(b.x, vp.width)};top:${pct(b.y, vp.height)};width:${pct(b.w, vp.width)};height:${pct(b.h, vp.height)}`; box.appendChild(d); }
+    wire(pageNo, doc.numPages);
+  } catch (e) {
+    // Fallback: the server rasterises the page (fine for PDFs that embed their fonts or use the standard ones).
+    try {
+      const cited = n === citedPage;
+      const r = await api(`/api/documents/${c.document_id}/page/${n}?` + (cited ? (c.chunk_id ? `chunk=${c.chunk_id}` : `text=${encodeURIComponent((c.excerpt || "").slice(0, 1500))}`) : ""));
+      if (my !== renderPdfPage.seq || !$("#ev-page")) return;
+      box.innerHTML = `<img src="${r.image}" alt="Page ${r.page} of ${esc(c.title)}" width="${r.width}" height="${r.height}">` + r.boxes.map((b) => `<div class="hl" style="left:${pct(b.x, r.width)};top:${pct(b.y, r.height)};width:${pct(b.w, r.width)};height:${pct(b.h, r.height)}"></div>`).join("");
+      wire(r.page, r.pages);
+    } catch (e2) { if (my === renderPdfPage.seq && $("#ev-page")) box.innerHTML = `<div class="ld">${esc(e2.message)}</div>`; }
+  }
 }
 function renderAllSources(citations) {
   $("#src-count").textContent = citations && citations.length ? `(${citations.length})` : "";

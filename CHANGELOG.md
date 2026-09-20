@@ -4,6 +4,14 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 
 ## [Unreleased]
 
+### Fixed
+- 2026-09-20: **The Evidence page view showed blank pages for many PDFs.** Pages
+  were rasterised on the server, where pdf.js has no system fonts: PDFs that
+  do not embed their fonts (most Word-made ones) drew no text at all, and a
+  pdf.js option (`useSystemFonts`) hid text even for the rest. Pages are now
+  rendered in the browser with pdf.js, with the same highlight boxes; the
+  server render remains as a fallback and now draws standard-font PDFs.
+
 ### Added
 - 2026-09-20: **Generated documents.** Ask in the chat for a memo, summary,
   checklist, spreadsheet, comparison or anything free-form ("write me a poem

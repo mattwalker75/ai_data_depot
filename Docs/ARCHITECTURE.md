@@ -79,6 +79,14 @@ scope → each page (HTML or PDF) goes through the same store path with a traili
 page" passage. Every job first makes one tiny embedding call (`assertEmbeddingReady`) and refuses
 if it fails, so nothing is read for nothing.
 
+## The Evidence page view
+
+A cited PDF page is rendered in the browser by pdf.js (served from the npm package at
+`/vendor/pdfjs/`) from `GET /api/documents/:id/file`; highlight boxes come from the page's
+text items matched by word overlap against the cited passage. The server can rasterise a page
+too (`/api/documents/:id/page/:n`), but only as a fallback: Node has no system fonts, so a PDF
+that does not embed its fonts renders without text there.
+
 ## Trust boundary
 
 Single user, local machine, no login. What stands in for authentication: the server binds to

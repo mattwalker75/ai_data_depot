@@ -46,6 +46,9 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: "20mb" }));
 // UI files are served from disk; never let a browser keep a stale copy after
 // an update — always revalidate (ETag makes an unchanged file a cheap 304).
+// pdf.js for the Evidence page view is served from its npm package (the
+// browser has the system fonts a PDF may rely on; Node does not).
+app.use("/vendor/pdfjs", express.static(path.dirname(require.resolve("pdfjs-dist/package.json")), { maxAge: "1d" }));
 app.use(express.static(path.join(__dirname, "public"), { extensions: ["html"], etag: true, lastModified: true, setHeaders: (res) => res.set("cache-control", "no-cache") }));
 
 const VERSION = require("./package.json").version;
@@ -126,7 +129,16 @@ app.get("/api/documents/:id", wrap((req, res) => {
   if (!d) throw new Error("That document is no longer in the index.");
   res.json(d);
 }));
-// A rendered PDF page for the Evidence drawer. Only indexed PDFs on disk; the
+// The indexed PDF itself, for the browser-side page view. Indexed PDF files only.
+app.get("/api/documents/:id/file", wrap((req, res) => {
+  const d = db.prepare("SELECT id, kind, locator, mime FROM documents WHERE id=? AND status='ok'").get(req.params.id);
+  if (!d) throw new Error("That document is no longer in the index.");
+  if (d.kind !== "file" || !/pdf/i.test(d.mime || "") || !/\.pdf$/i.test(d.locator)) throw new Error("Only PDF files can be shown as pages.");
+  if (!fs.existsSync(d.locator)) throw new Error("That file is not on this computer any more.");
+  res.set("content-type", "application/pdf"); res.set("content-disposition", `inline; filename="${encodeURIComponent(path.basename(d.locator))}"`); res.set("cache-control", "no-cache");
+  fs.createReadStream(d.locator).pipe(res);
+}));
+// A rendered PDF page for the Evidence drawer (server-side fallback; the browser renders when it can). Only indexed PDFs on disk; the
 // cited chunk's text is used to place highlight boxes. Small in-memory cache.
 const pageCache = new Map();
 app.get("/api/documents/:id/page/:n", wrap(async (req, res) => {

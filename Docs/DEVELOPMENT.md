@@ -62,3 +62,7 @@ DEPOT.sh · INSTALL_APP.sh · config.template.json · CHANGELOG.md · CLAUDE.md
 - SSE in Node ≥ 18: listen on `res.on("close")`, not `req.on("close")` — the request stream
   closes as soon as the body is consumed.
 - A `<button>` inside `<form method="dialog">` submits the dialog; give it `type="button"`.
+- pdf.js in Node draws **no text** unless `disableFontFace: true` and `useSystemFonts` is off;
+  even then a PDF that does not embed its fonts (Word's Calibri/Tahoma) draws nothing. That is
+  why the Evidence page view renders in the browser (`/vendor/pdfjs/`, the user's fonts) and
+  the server render is only a fallback. OCR is unaffected (scanned pages are images).
