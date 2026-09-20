@@ -328,7 +328,7 @@ function srcMeta(s) {
   if (s.status === "indexing") return `<span class="pill busy">indexing</span>`;
   if (s.status === "error") return `<span class="pill err" title="${esc(s.last_error || "")}">error</span>`;
   if (s.status === "pending") return `<span class="pill">not indexed</span>`;
-  return `<span class="pill ok">${s.doc_count} ${s.kind === "website" ? "pages" : "files"}</span> ${s.last_indexed_at ? `<span class="meta">${fmtWhen(s.last_indexed_at)}</span>` : ""}${s.last_error ? ` <button class="errbtn" data-errors="${s.id}" title="Click to see which files and why">⚠ ${esc(s.last_error)}</button>` : ""}`;
+  return `<span class="pill ok" title="${s.kind === "website" ? "pages read and indexed" : "files read and indexed"}">${Number(s.doc_count).toLocaleString()} ${s.kind === "website" ? "pages" : "files"} indexed</span> ${s.last_indexed_at ? `<span class="meta">${fmtWhen(s.last_indexed_at)}</span>` : ""}${s.last_error ? ` <button class="errbtn" data-errors="${s.id}" title="Click to see which files and why">⚠ ${esc(s.last_error)}</button>` : ""}`;
 }
 /** Before any indexing starts: a quick "hello" to the embedding model. If it
  * fails, an error window says what to set up and nothing is queued. */
@@ -358,6 +358,7 @@ async function showSourceErrors(sourceId) {
   const body = r.total ? r.groups.map((g) => `<details style="margin:6px 0"><summary style="cursor:pointer"><b>${g.count}</b> — ${esc(g.reason)}</summary><div style="font-family:var(--mono);font-size:11.5px;max-height:160px;overflow:auto;margin:6px 0 0 12px;color:var(--mute)">${g.files.map(esc).join("<br>")}${g.count > g.files.length ? `<br>… and ${g.count - g.files.length} more` : ""}</div></details>`).join("")
     : "No failed files any more.";
   const rateLimited = r.groups.some((g) => /429|rate limit|too large/i.test(g.reason));
+  // The window's Retry counts X of <failed>, unlike Re-index which walks every file.
   const v = await formDialog({ title: `${r.total} file${r.total === 1 ? "" : "s"} could not be read`, submit: "Retry the failed files", cancel: "Close",
     message: `${body}${rateLimited ? `<p class="hint" style="margin-top:10px">Rate-limit and "too large" failures are the provider being busy or a batch being too big — they are retried automatically now, so a Retry should clear them.</p>` : ""}`, onSubmit: async () => {} });
   if (v) { if (!(await ensureModelReady())) return; await api(`/api/sources/${sourceId}/retry-failed`, { method: "POST" }); toast(`Retrying the ${r.total} failed file${r.total === 1 ? "" : "s"} — only those.`); }
@@ -451,7 +452,7 @@ function showJob(j) {
   card.hidden = false;
   card.innerHTML = `<div class="ct"><span class="spin"></span>${verb} ${esc(j.target)}<span class="sp"></span><button class="btn sm" id="jc-stop">Stop after this ${unit.slice(0, -1)}</button></div>
     <div class="prog"><i style="width:${pct}%"></i></div>
-    <div class="meta"><span><b>${j.done || 0}</b> of <b>${j.total || "?"}</b> ${unit} ${j.kind === "website" ? "read" : "checked"}</span><span>${pct}%</span><span>${esc(left)}</span>${j.queued ? `<span>${j.queued} more job${j.queued > 1 ? "s" : ""} queued</span>` : ""}</div>
+    <div class="meta"><span><b>${Number(j.done || 0).toLocaleString()}</b> of <b>${j.total ? Number(j.total).toLocaleString() : "?"}</b> ${unit} ${j.kind === "website" ? "read" : /retry \d+ failed/.test(String(j.target)) ? "retried" : "checked (every file in the folder — unchanged ones are skipped quickly)"}</span><span>${pct}%</span><span>${esc(left)}</span>${j.queued ? `<span>${j.queued} more job${j.queued > 1 ? "s" : ""} queued</span>` : ""}</div>
     ${j.message ? `<div class="cur" title="${esc(j.message)}">${esc(j.message)}</div>` : ""}`;
   $("#jc-stop").onclick = guard(async () => { $("#jc-stop").disabled = true; $("#jc-stop").textContent = "Stopping…"; const r = await api("/api/index/stop", { method: "POST" }); if (!r.was_running) showJob(null); });
   $$(".srcline[data-loc]").forEach((row) => {
