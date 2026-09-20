@@ -21,6 +21,25 @@ const chat = require("./src/chat");
 const cfg = config.load();
 const db = open();
 const app = express();
+
+// Local-only trust boundary. There is no login by design (single user on
+// their own machine), so two things must hold instead: (1) only requests
+// addressed to this machine are served — a web page you visit cannot reach
+// the API through DNS rebinding, because its Host header would not match;
+// (2) state-changing requests must come from the app's own origin, so a
+// cross-site page cannot POST here even with a permissive Host.
+app.use((req, res, next) => {
+  const hostHeader = String(req.headers.host || "").replace(/:\d+$/, "").replace(/^\[|\]$/g, "").toLowerCase();
+  const allowed = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0", String(cfg.server.host || "").toLowerCase()]);
+  if (cfg.server.host === "0.0.0.0") { for (const ifs of Object.values(os.networkInterfaces())) for (const i of ifs || []) allowed.add(String(i.address).toLowerCase()); }
+  if (!allowed.has(hostHeader)) return res.status(421).json({ error: `Requests must be addressed to this machine (got Host "${hostHeader}").` });
+  if (!["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+    const origin = req.headers.origin, fetchSite = req.headers["sec-fetch-site"];
+    if (fetchSite && !["same-origin", "same-site", "none"].includes(fetchSite)) return res.status(403).json({ error: "Cross-site request refused." });
+    if (origin) { try { const oh = new URL(origin).hostname.toLowerCase(); if (!allowed.has(oh)) return res.status(403).json({ error: "Cross-site request refused." }); } catch { return res.status(403).json({ error: "Cross-site request refused." }); } }
+  }
+  next();
+});
 app.use(express.json({ limit: "20mb" }));
 // UI files are served from disk; never let a browser keep a stale copy after
 // an update — always revalidate (ETag makes an unchanged file a cheap 304).
@@ -61,7 +80,7 @@ app.patch("/api/bundles/:id", wrap((req, res) => {
   db.prepare("UPDATE bundles SET name=?, enabled=?, description=? WHERE id=?").run(name, enabled, description, b.id);
   res.json({ ok: true });
 }));
-app.delete("/api/bundles/:id", wrap((req, res) => { db.prepare("DELETE FROM bundles WHERE id=?").run(req.params.id); indexer.startWatchers(); res.json({ ok: true }); }));
+app.delete("/api/bundles/:id", wrap((req, res) => { db.prepare("DELETE FROM bundles WHERE id=?").run(req.params.id); require("./src/db").sweepOrphanVectors(); indexer.startWatchers(); res.json({ ok: true }); }));
 app.post("/api/bundles/:id/sources", wrap((req, res) => {
   const b = db.prepare("SELECT * FROM bundles WHERE id=?").get(req.params.id); if (!b) throw new Error("No such bundle.");
   const kind = req.body.kind === "website" ? "website" : "path";
@@ -87,7 +106,7 @@ app.patch("/api/sources/:id", wrap((req, res) => {
 }));
 app.post("/api/sources/:id/retry-failed", wrap((req, res) => res.json({ job: indexer.retryFailed(Number(req.params.id)) })));
 app.get("/api/sources/:id/errors", wrap((req, res) => res.json(indexer.sourceErrors(Number(req.params.id)))));
-app.delete("/api/sources/:id", wrap((req, res) => { db.prepare("DELETE FROM sources WHERE id=?").run(req.params.id); indexer.startWatchers(); res.json({ ok: true }); }));
+app.delete("/api/sources/:id", wrap((req, res) => { db.prepare("DELETE FROM sources WHERE id=?").run(req.params.id); require("./src/db").sweepOrphanVectors(); indexer.startWatchers(); res.json({ ok: true }); }));
 app.post("/api/sources/:id/index", wrap((req, res) => res.json({ job: indexer.indexSource(Number(req.params.id)) })));
 app.get("/api/bundles/:id/documents", wrap((req, res) => res.json(db.prepare("SELECT id, source_id, kind, locator, title, mime, bytes, page_count, char_count, ocr_pages, indexed_at, status, CASE WHEN status='error' THEN error END AS error FROM documents WHERE bundle_id=? ORDER BY kind, title LIMIT 2000").all(req.params.id))));
 app.get("/api/chunks/:id", wrap((req, res) => {
@@ -116,9 +135,14 @@ app.post("/api/fs/browse", wrap((req, res) => {
   const shortcuts = [["Home", home], ["Desktop", path.join(home, "Desktop")], ["Documents", path.join(home, "Documents")], ["Downloads", path.join(home, "Downloads")]].filter(([, p]) => fs.existsSync(p)).map(([name, p]) => ({ name, path: p }));
   res.json({ path: dir, parent: path.dirname(dir), home, shortcuts, entries });
 }));
+// Opens a cited item with the desktop's default app. Only something that is
+// actually in the index may be opened — never an arbitrary path or scheme.
 app.post("/api/open", wrap((req, res) => {
   const target = String(req.body.locator || "");
-  if (!/^https?:\/\//.test(target) && !fs.existsSync(target)) throw new Error("That file is not on this computer any more.");
+  const known = db.prepare("SELECT 1 FROM documents WHERE locator=? LIMIT 1").get(target);
+  if (!known) throw new Error("Only files and pages in your index can be opened from here.");
+  if (/^https?:\/\//.test(target)) { /* a web page: fine */ }
+  else if (!fs.existsSync(target)) throw new Error("That file is not on this computer any more.");
   const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
   execFile(cmd, [target], (err) => err && console.warn("[open]", err.message));
   res.json({ ok: true });
@@ -150,6 +174,12 @@ app.put("/api/settings", wrap((req, res) => {
   restartNeeded = [...new Set([...restartNeeded, ...r.restart_required])];
   indexer.startWatchers();
   res.json({ config: config.redacted(), restart_required: restartNeeded, changed_now: r.restart_required });
+}));
+app.post("/api/maintenance/compact", wrap((req, res) => { if (indexer.current()) throw new Error("Wait for indexing to finish first."); res.json(indexer.compact()); }));
+app.get("/api/maintenance/stats", wrap((req, res) => {
+  const f = path.join(config.dataDir(), "depot.sqlite"); const size = fs.existsSync(f) ? fs.statSync(f).size : 0;
+  const c = db.prepare("SELECT (SELECT count(*) FROM documents WHERE status='ok') AS documents, (SELECT count(*) FROM chunks) AS chunks, (SELECT count(*) FROM bundles) AS bundles").get();
+  res.json({ db_bytes: size, ...c, vec: require("./src/db").vecLoaded });
 }));
 app.post("/api/settings/reload", wrap((req, res) => { config.load(); indexer.startWatchers(); res.json({ config: config.redacted() }); }));
 const THEMES = [

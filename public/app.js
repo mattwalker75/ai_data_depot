@@ -1,4 +1,35 @@
-/* AI Data Depot — UI. Vanilla JS, no build step. */
+/*
+ * AI Data Depot — the whole UI in one file, plain JavaScript, no build step.
+ *
+ * How it is organised (search for the "// -----" banners):
+ *   helpers      $/$$ selectors, esc() (ALWAYS escape anything from the server
+ *                or the user before it goes into innerHTML), api() (JSON fetch
+ *                that throws the server's plain-language error), guard()
+ *                (wraps a handler so a thrown error becomes a toast), store
+ *                (localStorage with try/catch — it can be unavailable).
+ *   theme        presets are CSS token blocks in style.css; a custom theme is
+ *                a token set applied inline on <html>.
+ *   drawers      the two side panels: click a handle to collapse, drag to
+ *                resize; widths and collapsed state remembered per browser.
+ *   state        refresh() pulls /api/state (bundles, personas, sessions,
+ *                config) and re-renders the drawer, selects and notices.
+ *   chat         send() streams /api/chat over SSE; md() renders the reply's
+ *                Markdown subset and turns [n] into citation buttons;
+ *                finishAssistant() adds the basis badge and the ledger.
+ *   evidence     showCitation() fills the right drawer with the passage.
+ *   sessions     one JSON file each on the server; the header menu and the
+ *                Sessions page both go through saveSession()/loadSessionIntoUi().
+ *   sources      renderSources() draws bundle cards; dialogs (formDialog,
+ *                browse, pickFromList) replace browser prompt()/alert().
+ *   indexing     showJob() reacts to SSE progress: rail badge + Sources card.
+ *   personas     list + editor; built-ins are read-only, "Save a copy" forks.
+ *   settings     one pane per section, each saved with PUT /api/settings
+ *                (keys are masked; a masked key sent back means unchanged).
+ *
+ * Conventions: every element the code touches has a stable id; nothing here
+ * assumes an element exists after a re-render (query, then null-check);
+ * user-visible strings are plain English for a non-technical professional.
+ */
 (() => {
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -7,13 +38,16 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const state = { config: null, bundles: [], personas: [], sessions: [], session: null, view: "chat", sec: "models", streaming: null, lastCitations: [], modelsCache: {}, presets: [] };
 const store = { get(k, d) { try { const v = localStorage.getItem("depot." + k); return v == null ? d : JSON.parse(v); } catch { return d; } }, set(k, v) { try { localStorage.setItem("depot." + k, JSON.stringify(v)); } catch {} } };
 
+/** Transient message at the bottom of the window; the only feedback path for background errors. */
 function toast(msg, ms = 3200) { const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => (t.hidden = true), ms); }
+/** JSON request to this server. Throws an Error carrying the server's message (already plain English). */
 async function api(path, opts = {}) {
   const r = await fetch(path, { headers: { "content-type": "application/json" }, ...opts, body: opts.body && typeof opts.body !== "string" ? JSON.stringify(opts.body) : opts.body });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || `Request failed (${r.status})`);
   return j;
 }
+/** Wrap an event handler so any error (thrown or rejected) becomes a toast instead of a silent console line. */
 const guard = (fn) => (...a) => Promise.resolve(fn(...a)).catch((e) => toast(e.message, 5000));
 
 // ---------------------------------------------------------------- theme
@@ -37,6 +71,7 @@ function toHex(c) { if (/^#[0-9a-f]{6}$/i.test(c)) return c.toLowerCase(); const
 mq.addEventListener("change", () => state.config && applyTheme(state.config.appearance.theme));
 
 // ---------------------------------------------------------------- drawers
+/** Side drawers: click a handle to collapse/expand, drag to resize; widths + collapsed state persisted per browser. */
 function wireDrawers() {
   const app = $("#app");
   const saved = store.get("drawers", {});
@@ -68,6 +103,7 @@ function wireDrawers() {
 function openRightDrawer() { wireDrawers.open("r"); }
 
 // ---------------------------------------------------------------- state
+/** Pull the whole UI state from the server and re-render everything derived from it (idempotent; called after every mutation). */
 async function refresh() {
   const s = await api("/api/state");
   Object.assign(state, { config: s.config, bundles: s.bundles, personas: s.personas, sessions: s.sessions, presets: s.presets || state.presets, meta: { version: s.version, config_path: s.config_path, data_dir: s.data_dir, sqlite_vec: s.sqlite_vec, restart_required: s.restart_required } });
@@ -218,6 +254,12 @@ function renderPersonaSelect() {
 function linkify(escaped) {
   return escaped.replace(/(https?:\/\/[^\s<>"']+?)([.,;:!?)\]]*)(?=\s|$|<)/g, (m, url, tail) => `<a href="${url}" target="_blank" rel="noopener">${url}</a>${tail}`);
 }
+/**
+ * Render the Markdown subset models actually use (paragraphs, headings, lists,
+ * fenced code, pipe tables, bold/italic/code, links) to safe HTML. Everything
+ * is escaped first; `[n]` becomes a citation button; the general-knowledge
+ * marker becomes a labelled block; bare URLs become links.
+ */
 function md(src) {
   const lines = String(src).replace(/\r/g, "").split("\n");
   let html = "", i = 0, para = [];
@@ -264,6 +306,7 @@ function wireCitations(el, citations) {
   el.dataset.citations = JSON.stringify(citations || []);
   $$(".r[data-cite]", el).forEach((b) => { const c = (citations || []).find((x) => x.n === Number(b.dataset.cite)); if (!c) { b.classList.add("dead"); b.title = "Not a source"; return; } b.addEventListener("click", () => { $$(".r.on").forEach((x) => x.classList.remove("on")); b.classList.add("on"); showCitation(c, citations); }); });
 }
+/** Send the composer's text: stream tokens into a new assistant bubble, then finalise with citations, ledger and basis; autosave the session. */
 async function send() {
   const ta = $("#composer"); const text = ta.value.trim(); if (!text || state.streaming) return;
   if (!state.session) state.session = newSessionObject();
@@ -300,6 +343,7 @@ async function send() {
 }
 
 // ---------------------------------------------------------------- evidence
+/** Fill the Evidence drawer with one citation's passage; Prev/Next walk the cited list. */
 function showCitation(c, all) {
   openRightDrawer(); switchTab("passage");
   const ev = $("#evidence");
@@ -338,6 +382,7 @@ async function applyBundleNames(names) {
   if (changed) { await refresh(); toast("Bundles set the way this session had them."); }
 }
 async function autosave() { if (state.session && state.session.id) await saveSession(true); }
+/** Save the current conversation (creating it on first save) and refresh the session lists. */
 async function saveSession(quiet) {
   if (!state.session) state.session = newSessionObject();
   const s = state.session; s.name = $("#session-name").value.trim() || s.name; s.persona = currentPersona(); s.bundles = state.bundles.filter((b) => b.enabled).map((b) => b.name); s.mode = $("#strict-mode").checked ? "sources-only" : "sources-first";
@@ -408,6 +453,7 @@ async function editScope(sourceId) {
     onSubmit: async (v) => { await api(`/api/sources/${sourceId}`, { method: "PATCH", body: { options: { scope: v.scope, depth: Number(v.depth) } } }); } });
   if (v) { await refresh(); renderSources(); toast("Saved — click Re-index to read the site with the new scope."); }
 }
+/** The Sources page: one card per bundle with its description, sources, statuses and actions. Re-rendered wholesale after any change. */
 function renderSources() {
   renderReadyNotice();
   const el = $("#sources-page");
@@ -473,6 +519,7 @@ function browse() {
 // at the top and on the row being worked on.
 const jobStats = { id: null, t0: 0, d0: 0 };
 function fmtLeft(sec) { if (!isFinite(sec) || sec < 0) return ""; if (sec < 60) return "under a minute left"; if (sec < 3600) return `about ${Math.round(sec / 60)} min left`; return `about ${(sec / 3600).toFixed(1)} h left`; }
+/** React to an indexing progress event (SSE): rail badge, Sources card with counts/ETA, and the busy source row. `null` or a finished status clears everything. */
 function showJob(j) {
   const strip = $("#idx-strip"), badge = $("#sources-badge"), card = $("#jobcard");
   const finished = !j || ["done", "failed", "stopped"].includes(j.status);
@@ -538,6 +585,7 @@ function editPersona(p, fresh) {
 
 // ---------------------------------------------------------------- settings
 const SEC_TITLES = { models: ["Models", "The chat model answers; the embedding model builds the index. Both come from the provider you choose."], appearance: ["Appearance", "Applies immediately."], files: ["Indexing · Files", "Folders and files in your bundles."], websites: ["Indexing · Websites", "Websites in your bundles are read within their scope and re-checked on a schedule."], general: ["General", "Where the tool listens and keeps its data."], about: ["About", ""] };
+/** Settings: renders the selected section from the redacted config and wires its Save buttons. Each section PUTs only its own keys. */
 async function renderSettings() {
   const cfg = (await api("/api/settings"));
   state.config = cfg.config; state.presets = cfg.presets; state.meta.restart_required = cfg.restart_required;
@@ -604,13 +652,22 @@ async function renderSettings() {
       <div class="row"><label>Data folder</label><input class="fld mono" id="g-data" value="${esc(state.config.data_dir)}"></div>
       <div class="row"><label>Config file</label><span class="fld mono" style="border:none;padding-left:0">${esc(state.meta.config_path)}</span></div>
       <div class="warn">⚠ Port, listen address and data folder take effect after you restart AI Data Depot.</div>
-      <div class="row wide" style="display:flex;gap:8px"><button class="btn pri" id="g-save">Save</button><button class="btn" id="g-reload" title="If you edited config.json in a text editor">Reload config.json</button></div></div>`;
+      <div class="row wide" style="display:flex;gap:8px"><button class="btn pri" id="g-save">Save</button><button class="btn" id="g-reload" title="If you edited config.json in a text editor">Reload config.json</button></div></div>
+      <div class="card"><div class="ct">Storage</div>
+      <p id="g-stats" class="hint">Loading…</p>
+      <div class="row wide" style="display:flex;gap:8px;align-items:center"><button class="btn" id="g-compact">Compact the database</button><span class="hint">Returns space freed by removed or re-indexed sources to disk. Takes a moment; wait for indexing to finish first.</span></div></div>`;
   } else {
     html += `<div class="card"><div class="ct">AI Data Depot ${esc(state.meta.version)}</div><p>A local reference assistant. It answers only from the folders and websites you enable, cites every claim, and says when the answer isn't in your sources.</p>
       <table class="tbl"><tr><td>Config</td><td style="font-family:var(--mono);font-size:12px">${esc(state.meta.config_path)}</td></tr><tr><td>Data</td><td style="font-family:var(--mono);font-size:12px">${esc(state.meta.data_dir)}</td></tr><tr><td>Vector search</td><td>${state.meta.sqlite_vec ? "sqlite-vec (native)" : "in-process fallback"}</td></tr></table></div>`;
   }
   pane.innerHTML = html;
   // wiring
+  if ($("#g-stats")) {
+    const fmtB = (n) => n > 1e9 ? (n / 1e9).toFixed(2) + " GB" : n > 1e6 ? (n / 1e6).toFixed(1) + " MB" : Math.round(n / 1e3) + " KB";
+    const showStats = async () => { const st = await api("/api/maintenance/stats"); $("#g-stats").textContent = `${st.documents.toLocaleString()} documents · ${st.chunks.toLocaleString()} passages · ${st.bundles} bundles · database ${fmtB(st.db_bytes)} · vectors: ${st.vec ? "sqlite-vec" : "in-process fallback"}`; };
+    showStats().catch(() => { $("#g-stats").textContent = ""; });
+    $("#g-compact").onclick = guard(async () => { $("#g-compact").disabled = true; try { const r = await api("/api/maintenance/compact", { method: "POST" }); toast(`Compacted: ${fmtB(r.before)} → ${fmtB(r.after)}.`); await showStats(); } finally { $("#g-compact").disabled = false; } });
+  }
   $$("[data-prov]", pane).forEach((b) => b.addEventListener("click", guard(async () => { await api("/api/settings", { method: "PUT", body: { models: { active: b.dataset.prov } } }); await renderSettings(); renderPrivacy(); })));
   const saveModels = guard(async () => { const k = m.active; await api("/api/settings", { method: "PUT", body: { models: { active: k, providers: { [k]: { base_url: $("#m-url").value.trim(), api_key: $("#m-key").value, chat_model: $("#m-chat").value.trim(), embedding_model: $("#m-emb").value.trim() } }, context_chunks: Number($("#m-chunks").value), temperature: Number($("#m-temp").value), max_tokens: Number($("#m-max").value) }, chat: { mode: $("#m-mode").value, show_reasoning_ledger: $("#m-ledger").checked, not_found_phrase: $("#m-nf").value.trim() || "Not in your sources" } } }); toast("Saved."); await renderSettings(); renderPrivacy(); });
   $("#m-save") && ($("#m-save").onclick = saveModels); $("#m-save2") && ($("#m-save2").onclick = saveModels);
@@ -660,6 +717,7 @@ async function renderSettings() {
 }
 
 // ---------------------------------------------------------------- views
+/** Switch the main area; the side drawers exist only in Chat. Page views render on entry. */
 function showView(v) {
   state.view = v; $$(".rail .nav").forEach((b) => b.classList.toggle("on", b.dataset.view === v)); $$(".view").forEach((s) => s.classList.toggle("on", s.id === "view-" + v));
   $("#app").classList.toggle("nodrawers", v !== "chat"); // the Reading-from and Evidence drawers belong to Chat

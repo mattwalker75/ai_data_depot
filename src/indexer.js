@@ -50,6 +50,7 @@ async function pump() {
   db.prepare("UPDATE jobs SET status='running', started_at=? WHERE id=?").run(now(), job.id);
   try {
     const summary = await job.runner(progress);
+    require("./db").sweepOrphanVectors();
     db.prepare("UPDATE jobs SET status=?, finished_at=?, message=? WHERE id=?").run(stopRequested ? "stopped" : "done", now(), summary || null, job.id);
     events.emit("job", { id: job.id, kind: job.kind, target: job.target, status: stopRequested ? "stopped" : "done", message: summary });
   } catch (e) {
@@ -102,8 +103,9 @@ async function storeDocument({ source, kind, locator, title, mime, bytes, pages,
     let docId;
     if (existing) {
       docId = existing.id;
+      // Vectors first: the subquery needs the chunk rows that are about to go.
+      if (require("./db").vecLoaded) { try { db.prepare(`DELETE FROM chunk_vec WHERE chunk_id IN (SELECT id FROM chunks WHERE document_id=?)`).run(docId); } catch {} }
       db.prepare("DELETE FROM chunks WHERE document_id=?").run(docId);
-      if (require("./db").vecLoaded && vectors.length) { try { db.prepare(`DELETE FROM chunk_vec WHERE chunk_id IN (SELECT id FROM chunks WHERE document_id=?)`).run(docId); } catch {} }
       db.prepare("UPDATE documents SET title=?, mime=?, bytes=?, content_hash=?, page_count=?, char_count=?, ocr_pages=?, fetched_at=?, indexed_at=?, status='ok', error=NULL WHERE id=?")
         .run(title, mime, bytes || null, hash, page_count || null, text.length, ocr_pages || 0, fetched_at || now(), now(), docId);
     } else {
@@ -116,7 +118,9 @@ async function storeDocument({ source, kind, locator, title, mime, bytes, pages,
     const insVec = useVec ? db.prepare("INSERT INTO chunk_vec(chunk_id, embedding) VALUES (?, ?)") : null;
     chunks.forEach((c, i) => {
       const blob = vectors[i] ? toBlob(vectors[i]) : null;
-      const cid = ins.run(docId, source.bundle_id, c.seq, c.text, c.location, blob, embModel).lastInsertRowid;
+      // With sqlite-vec live the vector lives in chunk_vec only; the BLOB column
+      // is the fallback store for installs where the extension did not load.
+      const cid = ins.run(docId, source.bundle_id, c.seq, c.text, c.location, useVec ? null : blob, embModel).lastInsertRowid;
       if (insVec && blob) insVec.run(BigInt(cid), blob);
     });
     return docId;
@@ -198,7 +202,7 @@ function withLinksPage(page) {
 }
 /** A scope change must not be masked by "304 Not Modified" on the next re-check. */
 function forgetConditionalMeta(sourceId) {
-  open().prepare("UPDATE documents SET error=NULL WHERE source_id=? AND status='ok'").run(sourceId);
+  open().prepare("UPDATE documents SET meta=NULL WHERE source_id=?").run(sourceId);
 }
 async function indexWebsiteSource(source, progress) {
   await assertEmbeddingReady();
@@ -206,8 +210,8 @@ async function indexWebsiteSource(source, progress) {
   db.prepare("UPDATE sources SET status='indexing', last_error=NULL WHERE id=?").run(source.id);
   const cap = config.get().indexing.websites.max_pages_per_site;
   const known = {};
-  for (const d of db.prepare("SELECT locator, content_hash, error FROM documents WHERE source_id=?").all(source.id)) {
-    try { const meta = d.error && d.error.startsWith("{") ? JSON.parse(d.error) : {}; known[d.locator] = { etag: meta.etag, lastModified: meta.lastModified, links: meta.links, hash: d.content_hash }; } catch {}
+  for (const d of db.prepare("SELECT locator, content_hash, meta FROM documents WHERE source_id=? AND status='ok'").all(source.id)) {
+    try { const meta = d.meta ? JSON.parse(d.meta) : {}; known[d.locator] = { etag: meta.etag, lastModified: meta.lastModified, links: meta.links, hash: d.content_hash }; } catch {}
   }
   let n = 0, added = 0, unchanged = 0, failed = 0;
   const seenNow = new Set();
@@ -220,8 +224,7 @@ async function indexWebsiteSource(source, progress) {
       n++; seenNow.add(page.url);
       try {
         const r = await storeDocument({ source, kind: "web", locator: page.url, title: page.title, mime: page.mime, bytes: page.bytes, pages: withLinksPage(page), page_count: page.page_count, ocr_pages: page.ocr_pages, fetched_at: now() });
-        // Conditional-request metadata rides in `error` (JSON) for ok docs — a small abuse, kept local to this file.
-        db.prepare("UPDATE documents SET error=? WHERE id=? AND status='ok'").run(JSON.stringify({ etag: page.etag, lastModified: page.lastModified, links: page.links.slice(0, 500).map((l) => l.url) }), r.id);
+        db.prepare("UPDATE documents SET meta=? WHERE id=?").run(JSON.stringify({ etag: page.etag, lastModified: page.lastModified, links: page.links.slice(0, 500).map((l) => l.url) }), r.id);
         if (r.skipped) unchanged++; else added++;
       } catch (e) { failed++; markDocError(source, page.url, "web", page.title || page.url, e.message); }
     },
@@ -268,7 +271,7 @@ function retryFailed(sourceId) {
       try {
         await crawl(url, { mode: "page", onPage: async (page) => {
           await storeDocument({ source: s, kind: "web", locator: page.url, title: page.title, mime: page.mime, bytes: page.bytes, pages: withLinksPage(page), page_count: page.page_count, ocr_pages: page.ocr_pages, fetched_at: now() });
-          db.prepare("UPDATE documents SET error=? WHERE source_id=? AND locator=? AND status='ok'").run(JSON.stringify({ etag: page.etag, lastModified: page.lastModified, links: page.links.slice(0, 500).map((l) => l.url) }), s.id, page.url);
+          db.prepare("UPDATE documents SET meta=? WHERE source_id=? AND locator=?").run(JSON.stringify({ etag: page.etag, lastModified: page.lastModified, links: page.links.slice(0, 500).map((l) => l.url) }), s.id, page.url);
           ok++;
         } });
       } catch (e) { bad++; markDocError(s, url, "web", url, e.message); }
@@ -363,8 +366,35 @@ function recoverStaleState() {
   if (!db.prepare("SELECT 1 FROM meta WHERE key='web_links_v2'").get()) {
     const w = db.prepare("UPDATE documents SET error=NULL WHERE kind='web' AND status='ok'").run().changes;
     db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES ('web_links_v2', ?)").run(now());
-    if (w) console.warn(`[index] ${w} web page(s) will be re-read on their next Re-check (link texts are now indexed)`);
+    if (w) console.warn(`[index] ${w} web page(s) will be re-read on their next Re-index (link texts are now indexed)`);
   }
+  housekeeping();
 }
 
-module.exports = { forgetConditionalMeta, retryFailed, sourceErrors, embeddingReady, recoverStaleState, events, indexFiles, indexWebsites, indexSource, stop, current, jobs, startWatchers, stopWatchers, startScheduler, walk };
+/** Cheap storage hygiene at startup and after big jobs. */
+function housekeeping() {
+  const db = open();
+  const dbmod = require("./db");
+  // One-time: embeddings used to be stored twice (BLOB + vec row); drop the BLOB where the vec row exists.
+  if (dbmod.vecLoaded && !db.prepare("SELECT 1 FROM meta WHERE key='blob_dedup_v1'").get()) {
+    try {
+      const n = db.prepare("UPDATE chunks SET embedding=NULL WHERE embedding IS NOT NULL AND id IN (SELECT chunk_id FROM chunk_vec)").run().changes;
+      db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES ('blob_dedup_v1', ?)").run(now());
+      if (n) console.warn(`[index] dropped ${n} duplicate embedding blobs (vectors live in sqlite-vec); Settings → General → Compact reclaims the space`);
+    } catch (e) { console.warn("[index] blob dedup skipped:", e.message); }
+  }
+  // One-time: conditional-request data used to ride in `error` as JSON on ok rows; move it to `meta`.
+  try { db.prepare("UPDATE documents SET meta=error, error=NULL WHERE status='ok' AND error LIKE '{%'").run(); } catch {}
+  const orphans = dbmod.sweepOrphanVectors(); if (orphans) console.warn(`[index] swept ${orphans} orphaned vectors`);
+  db.prepare("DELETE FROM jobs WHERE id NOT IN (SELECT id FROM jobs ORDER BY id DESC LIMIT 200)").run();
+}
+
+/** VACUUM: rebuilds the database file so freed space is returned to disk. Blocks the DB while it runs. */
+function compact() {
+  const db = open(); const before = fs.statSync(path.join(config.dataDir(), "depot.sqlite")).size;
+  housekeeping(); db.exec("VACUUM");
+  const after = fs.statSync(path.join(config.dataDir(), "depot.sqlite")).size;
+  return { before, after };
+}
+
+module.exports = { compact, housekeeping, forgetConditionalMeta, retryFailed, sourceErrors, embeddingReady, recoverStaleState, events, indexFiles, indexWebsites, indexSource, stop, current, jobs, startWatchers, stopWatchers, startScheduler, walk };

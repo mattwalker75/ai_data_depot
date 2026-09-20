@@ -85,8 +85,10 @@ function get() { return current || load(); }
 
 function save(cfg) {
   const tmp = CONFIG_PATH + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n");
+  // config.json carries API keys: owner read/write only.
+  fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
   fs.renameSync(tmp, CONFIG_PATH);
+  try { fs.chmodSync(CONFIG_PATH, 0o600); } catch {}
   current = cfg;
   return cfg;
 }

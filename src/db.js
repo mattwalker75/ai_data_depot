@@ -62,8 +62,9 @@ function open() {
     console.warn("[db] sqlite-vec did not load (%s); using in-process vector search", e.message);
   }
   db.exec(SCHEMA);
-  // Per-source options (website scope/depth), added after the first release.
+  // Columns added after the first release (ALTER is idempotent here).
   try { db.exec("ALTER TABLE sources ADD COLUMN options TEXT"); } catch {}
+  try { db.exec("ALTER TABLE documents ADD COLUMN meta TEXT"); } catch {}
   return db;
 }
 
@@ -82,7 +83,14 @@ function ensureVec(dim) {
   return true;
 }
 
+/** Vectors of chunks that no longer exist (a deleted source or a re-indexed
+ * document) are dead weight in chunk_vec and pollute nearest-neighbour
+ * results; the virtual table has no foreign key, so sweep them here. */
+function sweepOrphanVectors() {
+  if (!vecLoaded) return 0;
+  try { return db.prepare("DELETE FROM chunk_vec WHERE chunk_id NOT IN (SELECT id FROM chunks)").run().changes; } catch { return 0; }
+}
 function toBlob(vec) { return Buffer.from(new Float32Array(vec).buffer); }
 function fromBlob(blob) { return new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4); }
 
-module.exports = { open, ensureVec, toBlob, fromBlob, get vecLoaded() { return vecLoaded; } };
+module.exports = { open, ensureVec, sweepOrphanVectors, toBlob, fromBlob, get vecLoaded() { return vecLoaded; } };
