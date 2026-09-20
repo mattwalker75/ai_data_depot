@@ -82,10 +82,14 @@ test("personas: built-ins are protected, user personas win by id", () => {
   personas.remove("estate-planner");
 });
 
-test("chat: grounding rules require citations and the not-found phrase", () => {
+test("chat: the two modes — strict refuses, sources-first converses and labels general knowledge", () => {
   const { groundingRules } = require("../src/chat");
-  const r = groundingRules("Not in your sources");
-  assert.match(r, /ONLY from the numbered SOURCES/); assert.match(r, /"Not in your sources"/); assert.match(r, /\[2\]/);
+  const strict = groundingRules("Not in your sources", "sources-only");
+  assert.match(strict, /ONLY from the numbered SOURCES/); assert.match(strict, /"Not in your sources"/); assert.match(strict, /\[2\]/);
+  const first = groundingRules("Not in your sources", "sources-first", "From general knowledge, not your sources:");
+  assert.match(first, /Converse naturally/); assert.match(first, /small talk/); assert.match(first, /"From general knowledge, not your sources:"/);
+  assert.match(first, /never make up a citation/i);
+  assert.doesNotMatch(first, /ONLY from the numbered SOURCES/);
 });
 
 test("crawler: scope modes — section, linked/site, page", () => {

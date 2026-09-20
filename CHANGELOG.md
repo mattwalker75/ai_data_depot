@@ -5,6 +5,19 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 ## [Unreleased]
 
 ### Changed
+- 2026-09-19: **Chat converses.** "Are you there?" got "Not in your sources" —
+  the strict rule was the only rule. There are now two modes, switchable per
+  conversation with a **Sources only** tick in the composer (default in
+  Settings → Models): *Sources first* replies normally to small talk, answers
+  from your sources with citations when they cover the question, and answers
+  the rest from general knowledge under an unmistakable "From general
+  knowledge, not your sources" label — never a made-up citation; *Sources
+  only* is the old strict behaviour. Every reply carries a badge (From your
+  sources / Sources + general knowledge / General knowledge), the mode is
+  saved with the session, and "How I answered" now lists the documents the
+  answer drew on rather than every passage retrieval merely looked at.
+
+### Changed
 - 2026-09-19: **Websites have a scope.** A registered page whose links fan out
   across a site (irs.gov/individuals/get-transcript) was read as one page,
   because the only rule was "everything under this address". Each website

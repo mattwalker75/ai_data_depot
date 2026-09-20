@@ -56,12 +56,13 @@
       <div class="thread" id="thread">
         <div class="welcome" id="welcome">
           <h2>Ask about your sources</h2>
-          <p>Answers come only from the bundles turned on in the Reading-from drawer, with a citation for every claim. If it isn't in your sources, it will say so.</p>
+          <p>Ask anything. When your sources (the bundles turned on in the Reading-from drawer) can answer, they are used and cited; anything from general knowledge is labelled. Tick <b>Sources only</b> to refuse everything else.</p>
           <p class="hint" id="welcome-hint"></p>
         </div>
       </div>
       <div class="compose">
-        <textarea id="composer" rows="1" placeholder="Ask a question about your sources…" aria-label="Your question"></textarea>
+        <label class="modeswitch" title="Sources first: converse normally, use your sources when relevant, label anything answered from general knowledge. Sources only: refuse anything your sources do not support."><input type="checkbox" id="strict-mode"><span>Sources only</span></label>
+        <textarea id="composer" rows="1" placeholder="Ask anything — your sources are used when they can answer…" aria-label="Your question"></textarea>
         <button class="btn pri" id="send-btn">Send</button>
         <button class="btn" id="stop-btn" hidden>Stop</button>
       </div>

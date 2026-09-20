@@ -175,15 +175,15 @@ app.get("/api/sessions/:id/export", wrap((req, res) => {
 
 // ---------------------------------------------------------------- chat (SSE)
 app.post("/api/chat", wrap(async (req, res) => {
-  const { message, history = [], persona = "general", bundle_ids = [], provider, model } = req.body || {};
+  const { message, history = [], persona = "general", bundle_ids = [], provider, model, mode } = req.body || {};
   if (!message || !String(message).trim()) throw new Error("Type a question first.");
   const send = sse(res);
   // res 'close' = the client went away. (req 'close' fires as soon as the
   // request body is consumed on modern Node, which is immediately here.)
   let closed = false; res.on("close", () => { closed = true; });
   try {
-    const r = await chat.answer({ message: String(message), history, personaId: persona, bundleIds: bundle_ids.map(Number).filter(Boolean), provider, model, onToken: (t) => { if (!closed) send("token", { text: t }); } });
-    if (!closed) send("done", { text: r.text, citations: r.citations, ledger: r.ledger, notFound: r.notFound });
+    const r = await chat.answer({ message: String(message), history, personaId: persona, bundleIds: bundle_ids.map(Number).filter(Boolean), provider, model, mode, onToken: (t) => { if (!closed) send("token", { text: t }); } });
+    if (!closed) send("done", { text: r.text, citations: r.citations, ledger: r.ledger, notFound: r.notFound, basis: r.basis, mode: r.mode });
   } catch (e) { if (!closed) send("error", { error: e.message }); }
   res.end();
 }));

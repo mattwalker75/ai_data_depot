@@ -39,9 +39,13 @@ bare words (`start`, `stop`, …) work too. `./INSTALL_APP.sh --help` likewise (
    `https://www.irs.gov/privacy-disclosure` covers `/privacy-disclosure/…`), *whole site*, or *this
    page only*. Other websites are never followed, translated copies (`/es/…`) are skipped, and
    every mode stops at the pages-per-website cap — this is deliberately not a search engine.
-3. **Ask** — the best passages from the enabled bundles are handed to the model, which must cite them
-   as `[1]`, `[2]`… Click a citation to see the exact passage in the Evidence drawer and open the
-   file or page. "How I answered" under each reply lists what was searched, read and skipped.
+3. **Ask** — the best passages from the enabled bundles are handed to the model, which cites them as
+   `[1]`, `[2]`… Click a citation to see the exact passage in the Evidence drawer and open the file or
+   page. Two modes, switchable per conversation: **Sources first** (default) converses normally, uses
+   your sources when they answer, and labels anything from general knowledge *"From general knowledge,
+   not your sources"*; **Sources only** refuses anything the sources don't support. Every reply carries a
+   badge — *From your sources* / *General knowledge* — and "How I answered" lists what was searched,
+   drawn on and skipped.
 4. **Personas** set voice and focus (Tax Specialist, Researcher, Legal, …); you can add your own. The
    source rules always apply on top.
 5. **Sessions** are saved conversations — one per customer or matter. Save, load, export (`.json` to

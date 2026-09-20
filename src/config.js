@@ -52,7 +52,8 @@ const DEFAULTS = {
   appearance: { theme: "harbor-light", _presets_note: "harbor-light, harbor-dark, reading-room, ledger, graphite, system, or the id of a custom theme below",
     _custom_note: "Your own colour themes: {id, name, dark, tokens:{bg, panel, ink, mute, line, acc, accInk, accSoft, accText, nav, navtxt, user, mark}}. Settings → Appearance edits these.",
     custom_themes: [] },
-  chat: { show_reasoning_ledger: true, not_found_phrase: "Not in your sources" },
+  chat: { _mode_note: "sources-first: converse normally, use the sources when relevant, label anything answered from general knowledge. sources-only: refuse anything the sources do not support (the strict mode). The Chat page can switch per conversation.",
+          mode: "sources-first", show_reasoning_ledger: true, not_found_phrase: "Not in your sources", general_marker: "From general knowledge, not your sources:" },
 };
 
 const RESTART_REQUIRED = ["server.port", "server.host", "data_dir"];

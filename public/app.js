@@ -192,7 +192,8 @@ function md(src) {
   const lines = String(src).replace(/\r/g, "").split("\n");
   let html = "", i = 0, para = [];
   const inline = (s) => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<i>$2</i>").replace(/\[(\d{1,2})\]/g, '<button class="r" data-cite="$1">$1</button>');
-  const flush = () => { if (para.length) { html += `<p>${inline(para.join(" "))}</p>`; para = []; } };
+  const marker = (state.config && state.config.chat.general_marker) || "From general knowledge, not your sources:";
+  const flush = () => { if (para.length) { let t = para.join(" "); if (t.startsWith(marker)) { html += `<div class="gk"><b style="font-size:12px;color:var(--warn)">${esc(marker.replace(/:$/, ""))}</b><br>${inline(t.slice(marker.length).trim())}</div>`; } else html += `<p>${inline(t)}</p>`; para = []; } };
   while (i < lines.length) {
     const l = lines[i];
     if (/^```/.test(l)) { flush(); let code = []; i++; while (i < lines.length && !/^```/.test(lines[i])) code.push(lines[i++]); i++; html += `<pre>${esc(code.join("\n"))}</pre>`; continue; }
@@ -212,13 +213,19 @@ function appendUser(text) { $("#welcome") && $("#welcome").remove(); const d = d
 function appendAssistant() { const d = document.createElement("div"); d.className = "ai"; d.innerHTML = `<div class="who"><i></i>${esc(personaName(currentPersona()))}</div><div class="body cursor"></div>`; $("#thread").appendChild(d); scrollThread(); return d; }
 function scrollThread() { const t = $("#thread"); t.scrollTop = t.scrollHeight; }
 function currentPersona() { return $("#persona-select").value || "general"; }
+function basisPill(basis) {
+  return basis === "sources" ? `<span class="basis sources">From your sources</span>` : basis === "mixed" ? `<span class="basis mixed">Sources + general knowledge</span>` : basis === "general" ? `<span class="basis general">General knowledge — not from your sources</span>` : "";
+}
 function ledgerHtml(l) {
   if (!l || !state.config.chat.show_reasoning_ledger) return "";
   const docs = l.documents.map((d) => `${esc(d.title)} <span style="color:var(--mute)">(${esc(d.bundle)})</span>`).join(", ");
-  return `<details class="steps"><summary>How I answered</summary>${l.searched.length ? `<span class="ok">Searched ${l.searched.map(esc).join(", ")} — ${l.passages} passages considered</span>` : `<span class="skip">No bundles were on</span>`}${docs ? `<span class="ok">Read ${docs}</span>` : ""}${l.skipped.length ? `<span class="skip">Skipped ${l.skipped.map(esc).join(", ")} (turned off)</span>` : ""}<span class="skip">${esc(l.persona)} · ${esc(l.model)} · ${esc(l.provider)}</span></details>`;
+  const used = l.basis === "sources" || l.basis === "mixed";
+  return `<details class="steps"><summary>How I answered</summary>${l.searched.length ? `<span class="ok">Searched ${l.searched.map(esc).join(", ")} — ${l.passages} passages considered${used ? "" : ", none used"}</span>` : `<span class="skip">No bundles were on</span>`}${docs ? `<span class="ok">Drew on ${docs}</span>` : ""}${l.basis === "general" ? `<span class="skip">Answered from the model's general knowledge — your sources did not cover it</span>` : ""}${l.basis === "chat" ? `<span class="skip">Conversational reply — no sources needed</span>` : ""}${l.skipped.length ? `<span class="skip">Skipped ${l.skipped.map(esc).join(", ")} (turned off)</span>` : ""}<span class="skip">${esc(l.persona)} · ${esc(l.model)} · ${esc(l.provider)} · ${l.mode === "sources-only" ? "sources only" : "sources first"}</span></details>`;
 }
 function finishAssistant(el, r) {
   el.classList.toggle("nf", !!r.notFound);
+  const basis = r.basis || (r.ledger && r.ledger.basis) || (r.citations && r.citations.length ? "sources" : "chat");
+  const who = el.querySelector(".who"); if (who && !who.querySelector(".basis")) who.insertAdjacentHTML("beforeend", basisPill(basis));
   el.querySelector(".body").classList.remove("cursor");
   el.querySelector(".body").innerHTML = ledgerHtml(r.ledger) + md(r.text);
   wireCitations(el, r.citations);
@@ -239,7 +246,7 @@ async function send() {
   const ctl = new AbortController(); state.streaming = ctl; $("#send-btn").hidden = true; $("#stop-btn").hidden = false;
   let acc = "";
   try {
-    const resp = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: text, history, persona: currentPersona(), bundle_ids: enabledBundleIds() }), signal: ctl.signal });
+    const resp = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: text, history, persona: currentPersona(), bundle_ids: enabledBundleIds(), mode: $("#strict-mode").checked ? "sources-only" : "sources-first" }), signal: ctl.signal });
     if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || `Request failed (${resp.status})`);
     const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = "", ev = null;
     for (;;) {
@@ -250,7 +257,7 @@ async function send() {
         if (line.startsWith("event:")) ev = line.slice(6).trim();
         else if (line.startsWith("data:")) { const d = JSON.parse(line.slice(5));
           if (ev === "token") { acc += d.text; body.textContent = acc; scrollThread(); }
-          else if (ev === "done") { finishAssistant(el, d); state.lastCitations = d.citations; renderAllSources(d.citations); state.session.messages.push({ role: "assistant", content: d.text, citations: d.citations, ledger: d.ledger, at: new Date().toISOString() }); }
+          else if (ev === "done") { finishAssistant(el, d); state.lastCitations = d.citations; renderAllSources(d.citations); state.session.messages.push({ role: "assistant", content: d.text, citations: d.citations, ledger: d.ledger, basis: d.basis, at: new Date().toISOString() }); }
           else if (ev === "error") { throw new Error(d.error); } }
       }
     }
@@ -288,8 +295,9 @@ function loadSessionIntoUi(s) {
   state.session = s; $("#session-name").value = s.name; $("#session-saved").textContent = s.id ? `saved ${fmtWhen(s.updated_at)}` : "unsaved";
   renderPersonaSelect(); $("#persona-select").value = s.persona || "general";
   const t = $("#thread"); t.innerHTML = "";
-  if (!s.messages.length) { t.innerHTML = `<div class="welcome" id="welcome"><h2>Ask about your sources</h2><p>Answers come only from the bundles turned on in the Reading-from drawer, with a citation for every claim.</p><p class="hint" id="welcome-hint"></p></div>`; renderWelcome(); }
-  for (const m of s.messages) { if (m.role === "user") appendUser(m.content); else { const el = appendAssistant(); finishAssistant(el, { text: m.content, citations: m.citations || [], ledger: m.ledger, notFound: false }); } }
+  if (!s.messages.length) { t.innerHTML = `<div class="welcome" id="welcome"><h2>Ask about your sources</h2><p>Ask anything. When your sources (the bundles turned on in the Reading-from drawer) can answer, they are used and cited; anything from general knowledge is labelled. Tick <b>Sources only</b> to refuse everything else.</p><p class="hint" id="welcome-hint"></p></div>`; renderWelcome(); }
+  $("#strict-mode").checked = s.mode === "sources-only" || (!s.mode && state.config.chat.mode === "sources-only");
+  for (const m of s.messages) { if (m.role === "user") appendUser(m.content); else { const el = appendAssistant(); finishAssistant(el, { text: m.content, citations: m.citations || [], ledger: m.ledger, basis: m.basis, notFound: false }); } }
   const last = [...s.messages].reverse().find((m) => m.role === "assistant" && m.citations && m.citations.length); state.lastCitations = last ? last.citations : []; renderAllSources(state.lastCitations);
   if (Array.isArray(s.bundles) && s.bundles.length) applyBundleNames(s.bundles);
   showView("chat");
@@ -302,7 +310,7 @@ async function applyBundleNames(names) {
 async function autosave() { if (state.session && state.session.id) await saveSession(true); }
 async function saveSession(quiet) {
   if (!state.session) state.session = newSessionObject();
-  const s = state.session; s.name = $("#session-name").value.trim() || s.name; s.persona = currentPersona(); s.bundles = state.bundles.filter((b) => b.enabled).map((b) => b.name);
+  const s = state.session; s.name = $("#session-name").value.trim() || s.name; s.persona = currentPersona(); s.bundles = state.bundles.filter((b) => b.enabled).map((b) => b.name); s.mode = $("#strict-mode").checked ? "sources-only" : "sources-first";
   const p = state.config.models.providers[state.config.models.active]; s.provider = state.config.models.active; s.model = p.chat_model;
   const saved = s.id ? await api(`/api/sessions/${s.id}`, { method: "PUT", body: s }) : await api("/api/sessions", { method: "POST", body: s });
   state.session = saved; $("#session-saved").textContent = `saved ${fmtWhen(saved.updated_at)}`;
@@ -517,6 +525,7 @@ async function renderSettings() {
       <div class="row"><label>Passages per answer</label><input class="fld" id="m-chunks" type="number" min="3" max="40" value="${m.context_chunks}"></div>
       <div class="row"><label>Temperature</label><input class="fld" id="m-temp" type="number" min="0" max="1" step="0.1" value="${m.temperature}"></div>
       <div class="row"><label>Max answer length (tokens)</label><input class="fld" id="m-max" type="number" min="200" max="16000" value="${m.max_tokens}"></div>
+      <div class="row"><label>Default mode</label><select class="fld" id="m-mode"><option value="sources-first" ${state.config.chat.mode !== "sources-only" ? "selected" : ""}>Sources first — converse normally, cite sources when they answer, label general knowledge</option><option value="sources-only" ${state.config.chat.mode === "sources-only" ? "selected" : ""}>Sources only — refuse anything the sources do not support</option></select></div>
       <div class="row"><label>Show “How I answered”</label><span class="chk"><input type="checkbox" id="m-ledger" ${state.config.chat.show_reasoning_ledger ? "checked" : ""}><span class="hint">under every answer</span></span></div>
       <div class="row"><label>“Not found” phrase</label><input class="fld" id="m-nf" value="${esc(state.config.chat.not_found_phrase)}"></div>
       <div class="row wide"><button class="btn pri" id="m-save2">Save</button></div></div>`;
@@ -570,7 +579,7 @@ async function renderSettings() {
   pane.innerHTML = html;
   // wiring
   $$("[data-prov]", pane).forEach((b) => b.addEventListener("click", guard(async () => { await api("/api/settings", { method: "PUT", body: { models: { active: b.dataset.prov } } }); await renderSettings(); renderPrivacy(); })));
-  const saveModels = guard(async () => { const k = m.active; await api("/api/settings", { method: "PUT", body: { models: { active: k, providers: { [k]: { base_url: $("#m-url").value.trim(), api_key: $("#m-key").value, chat_model: $("#m-chat").value.trim(), embedding_model: $("#m-emb").value.trim() } }, context_chunks: Number($("#m-chunks").value), temperature: Number($("#m-temp").value), max_tokens: Number($("#m-max").value) }, chat: { show_reasoning_ledger: $("#m-ledger").checked, not_found_phrase: $("#m-nf").value.trim() || "Not in your sources" } } }); toast("Saved."); await renderSettings(); renderPrivacy(); });
+  const saveModels = guard(async () => { const k = m.active; await api("/api/settings", { method: "PUT", body: { models: { active: k, providers: { [k]: { base_url: $("#m-url").value.trim(), api_key: $("#m-key").value, chat_model: $("#m-chat").value.trim(), embedding_model: $("#m-emb").value.trim() } }, context_chunks: Number($("#m-chunks").value), temperature: Number($("#m-temp").value), max_tokens: Number($("#m-max").value) }, chat: { mode: $("#m-mode").value, show_reasoning_ledger: $("#m-ledger").checked, not_found_phrase: $("#m-nf").value.trim() || "Not in your sources" } } }); toast("Saved."); await renderSettings(); renderPrivacy(); });
   $("#m-save") && ($("#m-save").onclick = saveModels); $("#m-save2") && ($("#m-save2").onclick = saveModels);
   $("#m-test") && ($("#m-test").onclick = guard(async () => { await saveModels(); }));
   const pickModel = (fieldId, what) => guard(async () => {
@@ -649,6 +658,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $$("#smenu button").forEach((b) => b.addEventListener("click", () => { state.sec = b.dataset.sec; $$("#smenu button").forEach((x) => x.classList.toggle("on", x === b)); renderSettings().catch((e) => toast(e.message)); }));
   try { await refresh(); } catch (e) { toast("Could not reach the server: " + e.message, 8000); return; }
   state.session = newSessionObject(); renderPersonaSelect(); $("#persona-select").value = store.get("persona", "general");
+  $("#strict-mode").checked = state.config.chat.mode === "sources-only";
   renderPrivacy(); wireIndexEvents();
   if (!state.bundles.length) showView("sources");
 });
