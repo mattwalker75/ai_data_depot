@@ -65,6 +65,7 @@
       <div class="focus" id="focus-chip" hidden></div>
       <div class="compose">
         <button class="btn icon" id="focus-btn" title="Ask about one document — only that document is searched until you clear it" aria-label="Ask about one document">📄</button>
+        <button class="btn icon" id="file-btn" title="Make a file — a memo, summary, checklist, spreadsheet or comparison from this conversation and your sources (or just ask for one in the chat)" aria-label="Make a file">🗎</button>
         <textarea id="composer" rows="1" placeholder="Ask anything — your sources are used when they can answer…" aria-label="Your question"></textarea>
         <button class="btn pri" id="send-btn">Send</button>
         <button class="btn" id="stop-btn" hidden>Stop</button>
@@ -102,9 +103,10 @@
   </main>
 
   <aside class="drawer dr" id="drawer-r"><div class="in">
-    <div class="tabs"><button class="on" data-tab="passage">Cited passage</button><button data-tab="all">All sources <span id="src-count"></span></button></div>
+    <div class="tabs"><button class="on" data-tab="passage">Cited passage</button><button data-tab="all">All sources <span id="src-count"></span></button><button data-tab="files">Files <span id="file-count"></span></button></div>
     <div id="evidence" class="evidence"><div class="empty">Click a citation like <span class="r">1</span> in an answer to see the passage it came from.</div></div>
     <div id="evidence-all" class="evidence" hidden></div>
+    <div id="files-pane" class="evidence" hidden></div>
   </div></aside>
 </div>
 
@@ -128,6 +130,13 @@
     <div class="dlist picklist" id="pick-list"></div>
     <div class="df"><span class="hint" id="pick-hint"></span><div class="sp"></div><button type="button" class="btn" id="pick-cancel">Cancel</button></div>
   </form>
+</dialog>
+<!-- floating preview of a generated file -->
+<dialog id="preview-dialog" class="dialog preview">
+  <div class="dcard">
+    <div class="dh"><b id="pv-title"></b><small class="hint" id="pv-sub"></small><button type="button" class="x" aria-label="Close">✕</button></div>
+    <div class="fprev" id="pv-body"></div>
+  </div>
 </dialog>
 <!-- generic small form (new bundle, add website) -->
 <dialog id="form-dialog" class="dialog">

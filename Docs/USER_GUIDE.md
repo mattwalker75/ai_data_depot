@@ -4,6 +4,23 @@ AI Data Depot answers questions from **your** material — folders on this compu
 you name — and shows you exactly where each answer came from. It is not a search engine and
 will not wander the internet.
 
+## Starting it as a desktop app
+
+`Start_Ai_Data_Depot.sh` (in the app folder) starts the server and opens AI Data Depot in its
+own window — not a tab in your browser; closing that window stops the app. Run it from a
+terminal, or make it a double-clickable `.app` for your Desktop or Applications folder with
+[my_mac_app](https://github.com/mattwalker75/my_mac_app):
+
+```sh
+mk_mac_app.py --name "AI Data Depot" --script ~/Desktop/REPOs/ai_data_depot/Start_Ai_Data_Depot.sh --emoji 🗄️
+```
+
+If the app is already running (started with `./DEPOT.sh`), the launcher just opens a window
+onto it and leaves it running afterwards. The port is read from `config.json`, so changing it
+in Settings needs no edit to the launcher. Requirements: `./INSTALL_APP.sh` run once, and a
+Chromium-based browser (Chrome, Edge, Brave or Arc) for the dedicated window — otherwise your
+default browser opens a tab.
+
 ## The window
 
 - **Rail (left edge)**: Chat, Sources, Personas, Sessions, and Settings at the bottom. A pulsing
@@ -75,6 +92,29 @@ numbered *Sources* list (title, page, file path or address) ready to paste into 
 passage highlighted; ‹ › walk through the document's pages. Other file types show the passage
 text.
 
+## 3b · Make a file
+
+Ask for one in the chat — *"turn this into a memo for the Hendersons"*, *"make a spreadsheet of
+every deadline in this file"*, *"write me a poem about flowers and save it as a PDF"*. The reply
+acknowledges it, a card appears while the file is made, then shows **Preview** and **Download**.
+**Preview** opens the file in a floating window over the page — *Client copy* (clean) and *With
+sources* (citations and a Sources section), each with its own download, plus Keep and Delete.
+Word and Excel preview as text there; the download is the real file. The **Files** tab in the
+right drawer is the list of this session's files (or all); click a row to open the same window,
+⬇ downloads the client copy.
+
+Kinds: memo/letter, summary/briefing, checklist, table/data extract (Excel by default; built
+document by document so nothing is skipped), comparison, and free-form for anything else.
+Memos, summaries and free-form documents can carry a small **diagram** — a flowchart, timeline,
+sequence or chart — when it helps or when you ask ("…with a flowchart of the steps"); it is
+drawn into PDF and Word files using your installed Chrome/Edge/Brave/Arc, and shown live in
+the preview. Switch off in Settings → General if you never want them.
+Formats: PDF, Word, Excel (tables and checklists), text. The 🗎 button next to the composer is the
+same thing as a form; **File** under any reply saves that reply as-is.
+
+Files live in `OUTPUT/` and are deleted after 30 days unless you tick **Keep** — the card then
+says *expired*. Delete removes a file at once. Details: [DOCUMENTS.md](DOCUMENTS.md).
+
 ## 4 · Personas
 
 A persona sets voice and focus (Tax Specialist, Researcher, Legal, Analyst, Tutor, Concise,
@@ -97,8 +137,9 @@ report) and **Import**.
   your own theme.
 - **Indexing · Files / Websites** — OCR, size limits, pages per site, schedule.
 - **General** — port, listen address, data folder (restart to apply), *Reload config.json* if you
-  edited it by hand, **Compact the database** to reclaim space after removing sources, and
-  **Backups**.
+  edited it by hand, **Compact the database** to reclaim space after removing sources,
+  **Generated files** (open a preview automatically when a file is created; how many days files
+  are kept), and **Backups**.
 
 ## 7 · Backups
 

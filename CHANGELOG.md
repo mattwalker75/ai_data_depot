@@ -4,6 +4,69 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 
 ## [Unreleased]
 
+### Added
+- 2026-09-20: **Diagrams in documents.** Memos, summaries and free-form
+  documents may include one small Mermaid diagram (flowchart, sequence,
+  timeline, pie, bar/line) when it helps or when asked. For PDF and Word
+  files the server draws it with your installed Chromium browser (Chrome,
+  Edge, Brave or Arc) headlessly and embeds the PNG; a diagram that fails to
+  parse is sent back to the model once, then falls back to the Mermaid source
+  with a note. The preview window draws diagrams live. Settings → General →
+  *Diagrams in documents* (config `output.diagrams`, `output.browser`). New
+  dependency: `mermaid` (served from its package).
+
+### Added
+- 2026-09-20: Settings → General → **Generated files**: whether a file opens
+  in the preview window as soon as it is created (`output.auto_preview`,
+  default on) and how many days files are kept (`output.keep_days`).
+
+### Changed
+- 2026-09-20: **File previews open in a floating window** (Preview on a card,
+  or a row in the Files tab) instead of inside the right drawer; the Files
+  tab is now just the list, with a ⬇ per row. Keep and Delete live in the
+  window; Delete asks first.
+
+### Added
+- 2026-09-20: `Start_Ai_Data_Depot.sh` — desktop-app launcher for my_mac_app:
+  starts the server in the foreground, opens a dedicated browser window,
+  stops the server when the window closes; reuses (and leaves running) an
+  instance that is already up; reads the port from config.json.
+
+### Fixed
+- 2026-09-20: **File cards disappeared after a reload** when the file had
+  been requested in chat or made with *File* on an earlier reply: saving the
+  session replaced the message objects the file was about to attach to.
+  Saving now keeps the same objects and only takes the server's id/time.
+- 2026-09-20: *Copy* renumbers citations 1, 2, 3 in order of use instead of
+  keeping the chat's internal numbers.
+- 2026-09-20: A fresh install no longer logs "blob dedup skipped: no such
+  table: chunk_vec" at every start.
+
+### Fixed
+- 2026-09-20: **The Evidence page view showed blank pages for many PDFs.** Pages
+  were rasterised on the server, where pdf.js has no system fonts: PDFs that
+  do not embed their fonts (most Word-made ones) drew no text at all, and a
+  pdf.js option (`useSystemFonts`) hid text even for the rest. Pages are now
+  rendered in the browser with pdf.js, with the same highlight boxes; the
+  server render remains as a fallback and now draws standard-font PDFs.
+
+### Added
+- 2026-09-20: **Generated documents.** Ask in the chat for a memo, summary,
+  checklist, spreadsheet, comparison or anything free-form ("write me a poem
+  about flowers and save it as a PDF") and the file is made: the model hands
+  the request to the app instead of writing it inline, the type drives the
+  prompt and the retrieval (tables are built document by document in two
+  passes), and the file is rendered with pdfkit / docx / SheetJS into
+  `OUTPUT/`. Two copies whenever anything was cited — a clean client copy and
+  a cited copy with a Sources section — previewed in the new **Files** tab of
+  the right drawer with a download each; a card under the reply links to it.
+  🗎 beside the composer is the same as a form; **File** under a reply saves
+  that reply as-is; a "Make this a file?" button appears when a message
+  clearly asked for one but the model did not hand it over. Files not marked
+  Keep are deleted at startup after `output.keep_days` (30); only files the
+  app generated are ever touched. Chat modes apply (Sources only refuses what
+  the sources cannot support). New dependencies: `pdfkit`, `docx`.
+
 ### Fixed
 - 2026-09-20: **"Unsupported parameter: 'max_tokens'… Use 'max_completion_tokens'".**
   Newer OpenAI models reject `max_tokens`. The first reply refused this way

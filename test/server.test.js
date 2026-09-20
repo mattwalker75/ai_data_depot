@@ -60,8 +60,12 @@ test("end to end: index, focus on one document, backup and restore", async (t) =
         const vec = (t) => { const v = new Array(8).fill(0); for (const ch of String(t).toLowerCase()) v[ch.charCodeAt(0) % 8] += 1; const n = Math.hypot(...v) || 1; return v.map((x) => x / n); };
         res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ data: input.map((x, i) => ({ index: i, embedding: vec(x) })) }));
       } else if (req.url.endsWith("/chat/completions")) {
-        const sys = JSON.parse(body).messages[0].content;
-        const reply = /ONE document/.test(sys) ? "Focused answer [1]." : "General answer [1].";
+        const msgs = JSON.parse(body).messages; const sys = msgs[0].content; const last = msgs[msgs.length - 1].content;
+        let reply = /ONE document/.test(sys) ? "Focused answer [1]." : "General answer [1].";
+        if (/WRITING A DOCUMENT/.test(sys)) reply = "## Summary\nThe retainer is **$2,000** [1].\n\nFrom general knowledge, not your sources:\nRetainers are common.\n\n## Next steps\n1. Confirm the fee [1].\n2. Sign.";
+        else if (/design a spreadsheet/.test(sys)) reply = JSON.stringify({ columns: [{ name: "Item", type: "text" }, { name: "Amount", type: "currency" }], one_row_is: "a fee" });
+        else if (/extract rows/.test(sys)) reply = /retainer/i.test(last) ? JSON.stringify({ rows: [["Retainer", "$2,000"], ["Monthly fee", ""]] }) : JSON.stringify({ rows: [] });
+        else if (/save it as a pdf/i.test(last)) reply = "I will make that memo.\n\n```depot-file\n{\"type\":\"memo\",\"format\":\"pdf\",\"title\":\"Henderson fees\",\"brief\":\"the retainer and fees\"}\n```";
         res.writeHead(200, { "content-type": "text/event-stream" });
         res.end(`data: ${JSON.stringify({ choices: [{ delta: { content: reply } }] })}\n\ndata: [DONE]\n\n`);
       } else if (req.url.endsWith("/models")) { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ data: [{ id: "m" }] })); }
@@ -96,6 +100,26 @@ test("end to end: index, focus on one document, backup and restore", async (t) =
   // switching the embedding model is detected
   await j("/api/settings", { method: "PUT", body: { models: { providers: { custom: { embedding_model: "e2" } } } } });
   const im2 = (await j("/api/state")).index_models; assert.equal(im2.current, "custom/e2"); assert.equal(im2.mismatch, 2);
+  // documents: the model hands over a request; generation writes two files; a table is built per document
+  const chat2 = await (await fetch(base + "/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: "Write a memo about the fees and save it as a PDF", history: [], persona: "general", bundle_ids: [bundleId], mode: "sources-first" }) })).text();
+  const done2 = JSON.parse(chat2.split("\n").find((l, i, a) => a[i - 1] === "event: done").slice(5));
+  assert.equal(done2.text, "I will make that memo.", "the request block is stripped from the reply");
+  assert.deepEqual(done2.file_request, { type: "memo", format: "pdf", title: "Henderson fees", brief: "the retainer and fees" });
+  const out = await j("/api/outputs/generate", { method: "POST", body: { request: done2.file_request, session_id: "sess1", history: [], bundle_ids: [bundleId], mode: "sources-first", persona: "general" } });
+  assert.equal(out.format, "pdf"); assert.equal(out.basis, "mixed"); assert.equal(out.files.length, 2, "client copy + cited copy");
+  const pdfBytes = Buffer.from(await (await fetch(`${base}/output/${out.files[1].name}`)).arrayBuffer()); assert.equal(pdfBytes.slice(0, 5).toString(), "%PDF-");
+  const prevC = await (await fetch(`${base}/api/outputs/${out.id}/preview?variant=client`)).text(); assert.doesNotMatch(prevC, /\[1\]|not your sources|Sources/); assert.match(prevC, /Retainers are common/, "general-knowledge content stays in the client copy, only its label goes");
+  const prevS = await (await fetch(`${base}/api/outputs/${out.id}/preview?variant=cited`)).text(); assert.match(prevS, /<sup class="cite">\[1\]<\/sup>/); assert.match(prevS, /Sources/); assert.match(prevS, /engagement\.txt/);
+  assert.equal((await j("/api/outputs?session=sess1")).outputs.length, 1);
+  const hint = JSON.parse((await (await fetch(base + "/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: "please put the fee schedule into a spreadsheet for me", bundle_ids: [bundleId] }) })).text()).split("\n").find((l, i, a) => a[i - 1] === "event: done").slice(5));
+  assert.equal(hint.file_request, null); assert.equal(hint.file_hint.type, "table"); assert.equal(hint.file_hint.format, "xlsx", "no block from the model → the app offers the file from the message");
+  const tbl = await j("/api/outputs/generate", { method: "POST", body: { request: { type: "table", format: "xlsx", title: "Fee schedule", brief: "every fee and amount" }, session_id: "sess1", bundle_ids: [bundleId], mode: "sources-only" } });
+  assert.equal(tbl.format, "xlsx"); assert.equal(tbl.files.length, 2);
+  const XLSX = require("xlsx"); const wb = XLSX.read(Buffer.from(await (await fetch(`${base}/output/${tbl.files[1].name}`)).arrayBuffer()));
+  assert.deepEqual(wb.SheetNames, ["Fee schedule", "Sources"]);
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets["Fee schedule"]); assert.equal(rows[0].Amount, 2000); assert.equal(rows[0].Source, "[1]");
+  await assert.rejects(j("/api/outputs/generate", { method: "POST", body: { request: { type: "memo", format: "pdf", title: "Moon", brief: "poem about the moon" }, bundle_ids: [bundleId], document_id: 999999, mode: "sources-only" } }), /Not in your sources/, "sources-only with nothing matching refuses instead of inventing");
+  assert.equal(await (await fetch(`${base}/output/..%2Fconfig.json`)).status, 400);
   // backup: bookmarks, no files, no keys
   const bk = await j("/api/maintenance/backups", { method: "POST" }); assert.equal(bk.bundles, 1); assert.ok(bk.bytes < 20000, "a backup is small");
   const dl = await fetch(`${base}/api/maintenance/backups/${bk.name}`);

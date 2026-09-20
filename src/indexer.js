@@ -386,7 +386,8 @@ function housekeeping() {
   const db = open();
   const dbmod = require("./db");
   // One-time: embeddings used to be stored twice (BLOB + vec row); drop the BLOB where the vec row exists.
-  if (dbmod.vecLoaded && !db.prepare("SELECT 1 FROM meta WHERE key='blob_dedup_v1'").get()) {
+  const hasVec = !!db.prepare("SELECT 1 FROM sqlite_master WHERE name='chunk_vec'").get();
+  if (dbmod.vecLoaded && hasVec && !db.prepare("SELECT 1 FROM meta WHERE key='blob_dedup_v1'").get()) {
     try {
       const n = db.prepare("UPDATE chunks SET embedding=NULL WHERE embedding IS NOT NULL AND id IN (SELECT chunk_id FROM chunk_vec)").run().changes;
       db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES ('blob_dedup_v1', ?)").run(now());

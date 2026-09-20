@@ -28,6 +28,10 @@ browser ──HTTP/SSE──▶ server.js ──▶ src/chat.js ──▶ src/re
 | `src/retrieval.js` | Hybrid search: sqlite-vec nearest neighbours + FTS5 keyword hits, fused by reciprocal rank, restricted to the enabled bundles. |
 | `src/chat.js` | The grounded answer: persona + mode rules + numbered passages → model; citations parsed back out; the "How I answered" ledger; answer basis (sources / general / mixed / chat). |
 | `src/personas.js`, `src/sessions.js` | Built-in + user personas (`data/personas.json`); sessions as one JSON file each (`data/sessions/`). |
+| `src/documents.js` | Generated documents: types (what the model is told, shape, allowed formats), the request block the chat model hands over, intent detection, prose and two-pass tabular generation, the `outputs` table, OUTPUT/ files and retention. |
+| `src/docmodel.js` | Markdown → typed blocks; client/cited variants; HTML and Markdown output of blocks. |
+| `src/render.js` | Blocks/sheets → bytes: pdfkit, docx, SheetJS, text (diagram blocks as embedded PNGs). |
+| `src/diagrams.js` | Mermaid → PNG through the user's installed Chromium browser, headless, over the DevTools protocol (`public/diagram.html` is the render page). |
 | `src/backup.js` | Backup zips (bundle/source bookmarks, sessions, personas, config without keys — never files or the index) and the merge-only restore. |
 | `public/` | `index.html` (shell + dialogs), `style.css` (theme tokens, one block per preset), `app.js` (all UI logic). |
 
@@ -39,6 +43,7 @@ bundles ─┬─ sources ─┬─ documents ─┬─ chunks ─── chunks_
          │           └─ options (JSON: website scope/depth)
          └─ enabled, description
 jobs (indexing runs, pruned to the last 200)      meta (key/value: vec_dim, migration flags)
+outputs (generated documents: title, type, format, basis, model JSON, files JSON, keep)
 ```
 
 - `documents.locator` is the file path or URL; `content_hash` is SHA-1 of the extracted text, so an
@@ -74,6 +79,14 @@ the document, its chunks, FTS rows and vectors. Websites: `crawler.crawl()` per 
 scope → each page (HTML or PDF) goes through the same store path with a trailing "Links on this
 page" passage. Every job first makes one tiny embedding call (`assertEmbeddingReady`) and refuses
 if it fails, so nothing is read for nothing.
+
+## The Evidence page view
+
+A cited PDF page is rendered in the browser by pdf.js (served from the npm package at
+`/vendor/pdfjs/`) from `GET /api/documents/:id/file`; highlight boxes come from the page's
+text items matched by word overlap against the cited passage. The server can rasterise a page
+too (`/api/documents/:id/page/:n`), but only as a fallback: Node has no system fonts, so a PDF
+that does not embed its fonts renders without text there.
 
 ## Trust boundary
 

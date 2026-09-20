@@ -25,7 +25,11 @@ function pdfjs() { return (pdfjsPromise ||= import("pdfjs-dist/legacy/build/pdf.
 // pdf.js ships the CJK character maps and the 14 standard fonts; pointing it
 // at them stops the "translateFont failed" warnings and renders those glyphs.
 const PDFJS_DIR = path.dirname(require.resolve("pdfjs-dist/package.json"));
-const PDF_OPTS = { cMapUrl: path.join(PDFJS_DIR, "cmaps") + "/", cMapPacked: true, standardFontDataUrl: path.join(PDFJS_DIR, "standard_fonts") + "/", useSystemFonts: true, isEvalSupported: false };
+// disableFontFace + NO useSystemFonts: there is no FontFace API and no
+// system font lookup in Node, so with either of those pdf.js silently draws
+// no text at all when rasterising a page (the Evidence page view and OCR of
+// text pages came out blank). Like this, glyphs are drawn as paths.
+const PDF_OPTS = { cMapUrl: path.join(PDFJS_DIR, "cmaps") + "/", cMapPacked: true, standardFontDataUrl: path.join(PDFJS_DIR, "standard_fonts") + "/", isEvalSupported: false, disableFontFace: true };
 
 let tessWorker = null;
 async function ocrImage(png) {
@@ -216,12 +220,16 @@ async function renderPdfPage(buffer, pageNo, excerpt, scale = 1.6) {
     await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
     const boxes = [];
     if (excerpt) {
-      const norm = (t) => String(t).toLowerCase().replace(/\s+/g, " ").trim();
-      const ex = norm(excerpt);
+      // Text items are whatever runs the PDF's producer wrote: single words
+      // in some files, whole lines in others. Match by word overlap so both
+      // work: an item lights up when most of its words are in the excerpt.
+      const words = (t) => String(t).toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}'’.-]{2,}/gu) || [];
+      const exWords = new Set(words(excerpt));
       const items = (await page.getTextContent()).items.filter((it) => "str" in it && it.str.trim());
-      const hit = items.map((it) => { const t = norm(it.str); return t.length >= 4 && ex.includes(t); });
+      const score = items.map((it) => { const w = words(it.str); if (!w.length) return 0; return { n: w.length, r: w.filter((x) => exWords.has(x)).length / w.length }; });
+      const hit = score.map((sc) => sc && sc.r >= 0.6 && (sc.n >= 3 || sc.r === 1));
       items.forEach((it, i) => {
-        if (!hit[i] || !(hit[i - 1] || hit[i + 1])) return;
+        if (!hit[i] || !(score[i].n >= 3 || hit[i - 1] || hit[i + 1])) return;
         const [x, y] = viewport.convertToViewportPoint(it.transform[4], it.transform[5]);
         const h = Math.abs(it.height * scale) || 10, w = Math.abs(it.width * scale);
         boxes.push({ x: Math.round(x), y: Math.round(y - h), w: Math.round(w), h: Math.round(h * 1.15) });

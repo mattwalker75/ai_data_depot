@@ -73,7 +73,8 @@ async function answer({ message, history = [], personaId = "general", bundleIds 
   if (documentId && !focus) throw new Error("That document is no longer in the index. Pick another one or clear the focus.");
   const hits = focus || searched.length ? await search(message, { bundleIds: searched.map((b) => b.id), k: cfg.models.context_chunks || 12, documentId: focus ? focus.id : null }) : [];
   const focusLine = focus ? `The user is asking about ONE document: "${focus.title || focus.locator}". All SOURCES below are passages from it; answer about that document.` : "";
-  const system = [persona.prompt, "", groundingRules(notFound, chatMode, marker), focusLine, "", hits.length ? "SOURCES:\n\n" + sourcesBlock(hits) : (chatMode === "sources-only" ? "SOURCES: (none matched — there is nothing to answer from)" : "SOURCES: (none of the user's sources matched this message)")].join("\n");
+  const { FILE_RULE, extractRequest, detectIntent } = require("./documents");
+  const system = [persona.prompt, "", groundingRules(notFound, chatMode, marker), focusLine, "", FILE_RULE, "", hits.length ? "SOURCES:\n\n" + sourcesBlock(hits) : (chatMode === "sources-only" ? "SOURCES: (none matched — there is nothing to answer from)" : "SOURCES: (none of the user's sources matched this message)")].join("\n");
   const messages = [{ role: "system", content: system }, ...trimHistory(history), { role: "user", content: message }];
 
   let text;
@@ -84,6 +85,11 @@ async function answer({ message, history = [], personaId = "general", bundleIds 
     text = await providers.chat(messages, { onToken, provider, model });
   }
 
+  // A file request: the model hands it to the app instead of writing the document inline.
+  const ex = extractRequest(text); text = ex.text;
+  const fileRequest = ex.request;
+  // The user plainly asked for a file but the model did not hand it over (smaller models): offer it.
+  const fileHint = !fileRequest ? detectIntent(message) : null;
   // Citations: only the numbers the answer actually used, in first-use order.
   const used = [];
   for (const m of text.matchAll(/\[(\d{1,2})\]/g)) { const n = Number(m[1]); if (n >= 1 && n <= hits.length && !used.includes(n)) used.push(n); }
@@ -94,7 +100,7 @@ async function answer({ message, history = [], personaId = "general", bundleIds 
   const usesGeneral = text.includes(marker);
   const basis = citations.length && usesGeneral ? "mixed" : citations.length ? "sources" : usesGeneral || isNotFound ? "general" : "chat";
   const ledger = { searched: focus ? [] : searched.map((b) => b.name), skipped: focus ? [] : skipped.map((b) => b.name), focus: focus ? (focus.title || focus.locator) : null, documents: citedDocs.slice(0, 8), passages: hits.length, persona: persona.name, model: (providers.providerConfig(provider)).chat_model, provider: providers.providerConfig(provider).label, mode: chatMode, basis };
-  return { text, citations, ledger, notFound: isNotFound, basis, mode: chatMode };
+  return { text, citations, ledger, notFound: isNotFound, basis, mode: chatMode, fileRequest, fileHint };
 }
 
-module.exports = { answer, groundingRules };
+module.exports = { answer, groundingRules, sourcesBlock, trimHistory, hrefFor };

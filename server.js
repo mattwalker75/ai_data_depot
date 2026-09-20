@@ -18,6 +18,7 @@ const personas = require("./src/personas");
 const sessions = require("./src/sessions");
 const chat = require("./src/chat");
 const backup = require("./src/backup");
+const documents = require("./src/documents");
 const extract = require("./src/extract");
 
 const cfg = config.load();
@@ -45,6 +46,11 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: "20mb" }));
 // UI files are served from disk; never let a browser keep a stale copy after
 // an update — always revalidate (ETag makes an unchanged file a cheap 304).
+// pdf.js for the Evidence page view is served from its npm package (the
+// browser has the system fonts a PDF may rely on; Node does not).
+app.use("/vendor/pdfjs", express.static(path.dirname(require.resolve("pdfjs-dist/package.json")), { maxAge: "1d" }));
+// Mermaid draws diagrams: in the preview window (browser) and, headlessly, for PDF/Word files.
+app.use("/vendor/mermaid", express.static(path.join(path.dirname(require.resolve("mermaid/package.json")), "dist"), { maxAge: "1d" }));
 app.use(express.static(path.join(__dirname, "public"), { extensions: ["html"], etag: true, lastModified: true, setHeaders: (res) => res.set("cache-control", "no-cache") }));
 
 const VERSION = require("./package.json").version;
@@ -125,7 +131,16 @@ app.get("/api/documents/:id", wrap((req, res) => {
   if (!d) throw new Error("That document is no longer in the index.");
   res.json(d);
 }));
-// A rendered PDF page for the Evidence drawer. Only indexed PDFs on disk; the
+// The indexed PDF itself, for the browser-side page view. Indexed PDF files only.
+app.get("/api/documents/:id/file", wrap((req, res) => {
+  const d = db.prepare("SELECT id, kind, locator, mime FROM documents WHERE id=? AND status='ok'").get(req.params.id);
+  if (!d) throw new Error("That document is no longer in the index.");
+  if (d.kind !== "file" || !/pdf/i.test(d.mime || "") || !/\.pdf$/i.test(d.locator)) throw new Error("Only PDF files can be shown as pages.");
+  if (!fs.existsSync(d.locator)) throw new Error("That file is not on this computer any more.");
+  res.set("content-type", "application/pdf"); res.set("content-disposition", `inline; filename="${encodeURIComponent(path.basename(d.locator))}"`); res.set("cache-control", "no-cache");
+  fs.createReadStream(d.locator).pipe(res);
+}));
+// A rendered PDF page for the Evidence drawer (server-side fallback; the browser renders when it can). Only indexed PDFs on disk; the
 // cited chunk's text is used to place highlight boxes. Small in-memory cache.
 const pageCache = new Map();
 app.get("/api/documents/:id/page/:n", wrap(async (req, res) => {
@@ -258,9 +273,37 @@ app.post("/api/chat", wrap(async (req, res) => {
   let closed = false; res.on("close", () => { closed = true; });
   try {
     const r = await chat.answer({ message: String(message), history, personaId: persona, bundleIds: bundle_ids.map(Number).filter(Boolean), provider, model, mode, documentId: Number(document_id) || null, onToken: (t) => { if (!closed) send("token", { text: t }); } });
-    if (!closed) send("done", { text: r.text, citations: r.citations, ledger: r.ledger, notFound: r.notFound, basis: r.basis, mode: r.mode });
+    if (!closed) send("done", { text: r.text, citations: r.citations, ledger: r.ledger, notFound: r.notFound, basis: r.basis, mode: r.mode, file_request: r.fileRequest, file_hint: r.fileHint });
   } catch (e) { if (!closed) send("error", { error: e.message }); }
   res.end();
+}));
+
+// ---------------------------------------------------------------- generated documents (OUTPUT/)
+app.get("/api/outputs", wrap((req, res) => res.json({ diagrams: { enabled: documents.diagramsEnabled(), available: require("./src/diagrams").available(), browser: require("./src/diagrams").findBrowser() }, types: Object.fromEntries(Object.entries(documents.TYPES).map(([k, t]) => [k, { label: t.label, formats: t.formats, default: t.default }])), formats: documents.FORMATS, keep_days: documents.keepDays(), dir: documents.outputDir(), outputs: documents.list(req.query.session || null) })));
+app.post("/api/outputs/generate", wrap(async (req, res) => {
+  const { request, session_id, history = [], bundle_ids = [], document_id, mode, persona, provider } = req.body || {};
+  if (!request || typeof request !== "object") throw new Error("Nothing to generate.");
+  res.json(await documents.generate(request, { sessionId: session_id, history, bundleIds: bundle_ids.map(Number).filter(Boolean), documentId: Number(document_id) || null, mode, personaId: persona, provider }));
+}));
+app.post("/api/outputs/from-text", wrap(async (req, res) => {
+  const { title, markdown, citations = [], format, session_id, basis } = req.body || {};
+  if (!markdown || !String(markdown).trim()) throw new Error("There is no text to put in a file.");
+  res.json(await documents.fromText({ title, markdown: String(markdown), citations, format, sessionId: session_id, basis }));
+}));
+app.get("/api/outputs/:id", wrap((req, res) => { const o = documents.get(req.params.id); if (!o) throw new Error("No such document."); res.json(o); }));
+app.get("/api/outputs/:id/preview", wrap((req, res) => { res.type("html").send(documents.previewHtml(req.params.id, req.query.variant === "cited" ? "cited" : "client")); }));
+app.patch("/api/outputs/:id", wrap((req, res) => res.json(documents.setKeep(req.params.id, !!req.body.keep))));
+app.delete("/api/outputs/:id", wrap((req, res) => { documents.remove(req.params.id); res.json({ ok: true }); }));
+// The files themselves. Inline for the preview (PDF and text), attachment with ?download=1.
+app.get("/output/:name", wrap((req, res) => {
+  const f = documents.fileFor(req.params.name);
+  const ext = path.extname(f).toLowerCase();
+  const mime = require("./src/render").MIME[ext] || "application/octet-stream";
+  const inline = !req.query.download && (ext === ".pdf" || ext === ".md");
+  res.set("content-type", ext === ".md" && inline ? "text/plain; charset=utf-8" : mime);
+  res.set("content-disposition", `${inline ? "inline" : "attachment"}; filename="${encodeURIComponent(req.params.name)}"`);
+  res.set("cache-control", "no-cache");
+  fs.createReadStream(f).pipe(res);
 }));
 
 app.get("/api/health", (req, res) => res.json({ ok: true, version: VERSION }));
@@ -270,8 +313,10 @@ const port = Number(process.env.PORT || cfg.server.port || 8300);
 const host = process.env.HOST || cfg.server.host || "127.0.0.1";
 app.listen(port, host, () => {
   const url = `http://${host === "0.0.0.0" ? "localhost" : host}:${port}`;
+  documents.setAppUrl(`http://127.0.0.1:${port}`);
   console.log(`AI Data Depot ${VERSION} — ${url}\n  config: ${config.CONFIG_PATH}\n  data:   ${config.dataDir()}\n  model:  ${cfg.models.active} (${cfg.models.providers[cfg.models.active].chat_model})`);
   indexer.recoverStaleState(); indexer.startWatchers(); indexer.startScheduler();
+  try { const n = documents.cleanup(); if (n) console.log(`[output] removed ${n} generated file(s) older than ${documents.keepDays()} days`); } catch (e) { console.warn("[output] cleanup skipped:", e.message); }
   if (cfg.server.open_browser && !process.env.DEPOT_NO_OPEN) { const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open"; execFile(cmd, [url], () => {}); }
 });
 process.on("SIGINT", async () => { await require("./src/extract").shutdown(); process.exit(0); });

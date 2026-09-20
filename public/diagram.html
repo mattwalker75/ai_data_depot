@@ -1,0 +1,29 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>diagram</title>
+<!-- Renders one Mermaid diagram for the server (headless browser) — see src/diagrams.js. -->
+<style>
+  html, body { margin: 0; background: #fff; }
+  #d { display: inline-block; padding: 16px; background: #fff; }
+  #d svg { display: block; max-width: none !important; }
+</style>
+<div id="d"></div>
+<script src="/vendor/mermaid/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({ startOnLoad: false, theme: "neutral", securityLevel: "strict", fontFamily: "Helvetica, Arial, sans-serif", themeVariables: { fontSize: "15px" } });
+  // Returns { ok, width, height } (CSS pixels of the box to capture) or { ok:false, error }.
+  window.renderDiagram = async (code, id) => {
+    const box = document.getElementById("d"); box.innerHTML = "";
+    try {
+      const { svg } = await mermaid.render("m" + (id || Date.now()), code);
+      box.innerHTML = svg;
+      const s = box.querySelector("svg");
+      // Give the SVG its natural size so nothing is squeezed.
+      const vb = s.viewBox && s.viewBox.baseVal;
+      if (vb && vb.width) { s.setAttribute("width", Math.min(1400, Math.ceil(vb.width))); s.removeAttribute("height"); s.style.height = "auto"; }
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const r = box.getBoundingClientRect();
+      return { ok: true, x: r.x, y: r.y, width: Math.ceil(r.width), height: Math.ceil(r.height) };
+    } catch (e) { return { ok: false, error: String(e && e.message || e).split("\n").slice(0, 3).join(" ") }; }
+  };
+</script>

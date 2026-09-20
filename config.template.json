@@ -123,6 +123,16 @@
       "user_agent": "AI-Data-Depot/0.1 (local reference assistant)"
     }
   },
+  "output": {
+    "_note": "Generated documents (memos, summaries, spreadsheets...) are written here as files; dir is relative to this file. Files of documents not marked Keep are deleted at startup once older than keep_days. auto_preview = open a file in the preview window as soon as it is created. diagrams = let documents include Mermaid diagrams, drawn into PDF/Word files with your installed Chromium browser (browser = its path, blank = find Chrome/Edge/Brave/Arc). context_chunks = passages handed to the model for a prose document; max_documents = documents examined for a table.",
+    "dir": "./OUTPUT",
+    "keep_days": 30,
+    "auto_preview": true,
+    "diagrams": true,
+    "browser": "",
+    "context_chunks": 24,
+    "max_documents": 12
+  },
   "appearance": {
     "theme": "harbor-light",
     "_presets_note": "harbor-light, harbor-dark, reading-room, ledger, system"

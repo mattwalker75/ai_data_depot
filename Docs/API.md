@@ -28,7 +28,8 @@ the only intended client, but everything is callable with `curl` from the same m
 | `GET /api/chunks/:id` | one passage (used by the Evidence drawer) |
 | `GET /api/documents?q=&bundle_ids=` | indexed documents of the enabled (or given) bundles — the "ask about one document" picker |
 | `GET /api/documents/:id` | one document's title, locator, kind, bundle |
-| `GET /api/documents/:id/page/:n?chunk=` | a PDF page rendered to PNG (`image` data URI, `width`, `height`, `pages`) plus `boxes` outlining the text of chunk `chunk` on that page; indexed PDF files only |
+| `GET /api/documents/:id/file` | the indexed PDF itself (PDF files only), streamed inline — the Evidence drawer renders pages from it in the browser with pdf.js (served from `/vendor/pdfjs/`) |
+| `GET /api/documents/:id/page/:n?chunk=` | a PDF page rendered to PNG (`image` data URI, `width`, `height`, `pages`) plus `boxes` outlining the text of chunk `chunk` on that page; indexed PDF files only. Server-side fallback used only when the browser cannot load pdf.js |
 
 ## Files
 
@@ -74,10 +75,14 @@ the only intended client, but everything is callable with `curl` from the same m
 | `POST /api/sessions/import` | body = an exported session JSON |
 | `GET /api/sessions/:id/export?format=json\|md` | download |
 
+## Generated documents
+
+See [DOCUMENTS.md](DOCUMENTS.md#api) — `/api/outputs…` and `/output/:name`.
+
 ## Chat
 
 `POST /api/chat` — `{ message, history, persona, bundle_ids, mode, document_id? }` → **SSE**
 (`document_id` restricts retrieval to that one document and tells the model so; the ledger
-carries `focus`):
+carries `focus`; `done` also carries `file_request` when the model handed over a document request, or `file_hint` when the message looked like one):
 `token { text }` repeated, then `done { text, citations, ledger, basis, mode }`, or `error { message }`.
 The connection closing on the client side aborts the model request.
