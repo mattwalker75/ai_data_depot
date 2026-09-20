@@ -10,7 +10,9 @@
 [data-theme="graphite"]{ --bg:#141416; --panel:#1c1c1f; --ink:#ececec; --mute:#9c9ca3; --line:#2c2c31; --acc:#d9b45c; --acc-ink:#1a1408; --acc-soft:#33301f; --acc-text:#e9cf8a;
   --nav:#0e0e10; --navtxt:#b9b9c0; --user:#242428; --ok:#63c58a; --warn:#e2b05a; --bad:#ff7a70; --mark:#4a4020; --shadow:0 4px 16px rgba(0,0,0,.45); color-scheme:dark; }
 
-*{box-sizing:border-box} html,body{height:100%} body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);font-size:14px;line-height:1.45}
+*{box-sizing:border-box} html,body{height:100%}
+/* An element with the hidden attribute stays hidden even when a class sets display. */
+[hidden]{display:none!important} body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);font-size:14px;line-height:1.45}
 button,input,select,textarea{font:inherit;color:inherit}
 a{color:var(--acc-text)}
 .app{--lw:270px;--rw:340px;height:100%;display:grid;grid-template-columns:64px var(--lw) minmax(0,1fr) var(--rw);position:relative;transition:grid-template-columns .18s ease}
