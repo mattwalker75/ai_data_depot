@@ -335,8 +335,12 @@ async function pickDocument() {
 
 /** Plain-text/Markdown copy of an answer with its numbered sources — for pasting into a memo. */
 function answerAsMarkdown(text, citations) {
-  const src = (citations || []).map((c) => `[${c.n}] ${c.title}${c.location ? ` — ${c.location}` : ""} — ${c.locator}`).join("\n");
-  return text.trim() + (src ? `\n\nSources:\n${src}` : "");
+  // Renumber 1..k in order of first use, so a pasted answer reads [1], [2] whatever the chat's numbering was.
+  const used = []; for (const m of String(text).matchAll(/\[(\d{1,2})\]/g)) { const n = Number(m[1]); if ((citations || []).some((c) => c.n === n) && !used.includes(n)) used.push(n); }
+  const map = new Map(used.map((n, i) => [n, i + 1]));
+  const body = String(text).replace(/\[(\d{1,2})\]/g, (s0, n) => (map.has(Number(n)) ? `[${map.get(Number(n))}]` : s0)).trim();
+  const src = used.map((n) => { const c = citations.find((x) => x.n === n); return `[${map.get(n)}] ${c.title}${c.location ? ` — ${c.location}` : ""} — ${c.locator}`; }).join("\n");
+  return body + (src ? `\n\nSources:\n${src}` : "");
 }
 async function copyText(t) {
   try { await navigator.clipboard.writeText(t); } catch { const ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); }
@@ -615,7 +619,11 @@ async function saveSession(quiet) {
   const s = state.session; s.name = $("#session-name").value.trim() || s.name; s.persona = currentPersona(); s.focus = state.focus; s.bundles = state.bundles.filter((b) => b.enabled).map((b) => b.name); s.mode = $("#strict-mode").checked ? "sources-only" : "sources-first";
   const p = state.config.models.providers[state.config.models.active]; s.provider = state.config.models.active; s.model = p.chat_model;
   const saved = s.id ? await api(`/api/sessions/${s.id}`, { method: "PUT", body: s }) : await api("/api/sessions", { method: "POST", body: s });
-  state.session = saved; $("#session-saved").textContent = `saved ${fmtWhen(saved.updated_at)}`;
+  // Keep the same session and message objects the UI holds references to (a
+  // file being generated attaches itself to its message after the save);
+  // only take the server-assigned fields.
+  s.id = saved.id; s.created_at = saved.created_at; s.updated_at = saved.updated_at; s.name = saved.name;
+  $("#session-saved").textContent = `saved ${fmtWhen(saved.updated_at)}`;
   state.sessions = await api("/api/sessions"); renderSessionsMenu(); if (state.view === "sessions") renderSessionsPage();
   if (!quiet) toast(`Saved “${saved.name}”.`);
 }

@@ -5,6 +5,16 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 ## [Unreleased]
 
 ### Fixed
+- 2026-09-20: **File cards disappeared after a reload** when the file had
+  been requested in chat or made with *File* on an earlier reply: saving the
+  session replaced the message objects the file was about to attach to.
+  Saving now keeps the same objects and only takes the server's id/time.
+- 2026-09-20: *Copy* renumbers citations 1, 2, 3 in order of use instead of
+  keeping the chat's internal numbers.
+- 2026-09-20: A fresh install no longer logs "blob dedup skipped: no such
+  table: chunk_vec" at every start.
+
+### Fixed
 - 2026-09-20: **The Evidence page view showed blank pages for many PDFs.** Pages
   were rasterised on the server, where pdf.js has no system fonts: PDFs that
   do not embed their fonts (most Word-made ones) drew no text at all, and a
