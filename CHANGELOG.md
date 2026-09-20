@@ -4,6 +4,13 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 
 ## [Unreleased]
 
+### Fixed
+- 2026-09-20: **Folder picker looked broken in dark themes**: the Size column
+  rendered as little badges (its cells shared a class with the citation
+  badge) and the file list ran underneath the Cancel / Use this folder bar.
+  Right-aligned table cells have their own class now and the list scrolls
+  inside the dialog body.
+
 ### Added
 - 2026-09-20: **Diagrams in documents.** Memos, summaries and free-form
   documents may include one small Mermaid diagram (flowchart, sequence,
