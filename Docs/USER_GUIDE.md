@@ -97,9 +97,11 @@ text.
 Ask for one in the chat — *"turn this into a memo for the Hendersons"*, *"make a spreadsheet of
 every deadline in this file"*, *"write me a poem about flowers and save it as a PDF"*. The reply
 acknowledges it, a card appears while the file is made, then shows **Preview** and **Download**.
-The **Files** tab in the right drawer lists this session's files (or all) and previews the
-selected one as *Client copy* (clean) and *With sources* (citations and a Sources section), each
-with its own download. Word and Excel preview as text; the download is the real file.
+**Preview** opens the file in a floating window over the page — *Client copy* (clean) and *With
+sources* (citations and a Sources section), each with its own download, plus Keep and Delete.
+Word and Excel preview as text there; the download is the real file. The **Files** tab in the
+right drawer is the list of this session's files (or all); click a row to open the same window,
+⬇ downloads the client copy.
 
 Kinds: memo/letter, summary/briefing, checklist, table/data extract (Excel by default; built
 document by document so nothing is skipped), comparison, and free-form for anything else.

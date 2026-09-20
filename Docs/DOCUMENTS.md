@@ -2,8 +2,8 @@
 
 Ask in the chat and get a file: *"turn this into a memo for the Hendersons"*, *"make a spreadsheet
 of every deadline in this file"*, *"write me a poem about flowers and save it as a PDF"*. The file
-lands in `OUTPUT/`, a card appears under the reply, and the **Files** tab in the right drawer
-previews it with a download for each copy.
+lands in `OUTPUT/`, a card appears under the reply, **Preview** opens it in a floating window
+(both copies, downloads, Keep, Delete), and the **Files** tab in the right drawer lists them.
 
 ## How a request becomes a file
 
@@ -40,8 +40,8 @@ every row knows which document it came from.
 
 When anything was cited, two files are written: the **client copy** (no `[n]` markers, no
 general-knowledge labels) and the **cited copy** (markers kept, a Sources section; for Excel a
-`Source` column and a Sources sheet). The Files tab shows both under *Client copy* / *With
-sources*, each with its own Download. A document that cites nothing — a poem, a general
+`Source` column and a Sources sheet). The preview window shows both under *Client copy* /
+*With sources*, each with its own Download. A document that cites nothing — a poem, a general
 explanation — is one file, and its card carries the *General knowledge* badge like a chat reply.
 
 Chat modes apply exactly as in chat: in *Sources only* a request the sources cannot support is

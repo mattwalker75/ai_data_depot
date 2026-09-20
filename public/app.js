@@ -512,7 +512,16 @@ function fileCardHtml(o, status) {
   return `<div class="filecard" data-output="${o.id}"><span class="fi">${FILE_ICON[o.format] || "📄"}</span><div class="ft"><b title="${esc(o.title)}">${esc(o.title)}</b><small>${esc(o.type_label)} · ${esc(o.format_label)}${f ? " · " + fmtBytes(f.bytes) : ""}${o.files.length > 1 ? " · client copy + cited copy" : ""}${gone ? " · expired" : ""}</small></div>
     <div class="fa">${gone ? "" : `<button type="button" class="btn sm" data-preview="${o.id}">Preview</button><a class="btn sm pri" href="/output/${encodeURIComponent(f.name)}?download=1" download>Download</a>`}</div></div>`;
 }
-function wireFileCards(el) { $$("[data-preview]", el).forEach((b) => (b.onclick = () => openFilesTab(Number(b.dataset.preview)))); }
+function wireFileCards(el) { $$("[data-preview]", el).forEach((b) => (b.onclick = guard(() => openFilePreview(Number(b.dataset.preview))))); }
+/** Preview = a floating window over the page (the Files tab is only the list). */
+async function openFilePreview(idOrRecord) {
+  const o = typeof idOrRecord === "object" ? idOrRecord : await api(`/api/outputs/${idOrRecord}`);
+  const dlg = $("#preview-dialog");
+  $("#pv-title").textContent = o.title; $("#pv-sub").textContent = `${o.type_label} · ${o.format_label} · ${fmtWhen(o.created_at)}`;
+  renderFilePreview(o, state.fileVariant || "client", $("#pv-body"));
+  $(".x", dlg).onclick = () => dlg.close();
+  if (!dlg.open) dlg.showModal();
+}
 function openFilesTab(id) { openRightDrawer(); switchTab("files"); state.fileSel = id; renderFilesPane(id).catch((e) => toast(e.message)); }
 /** Run the document pipeline for a request and drop the resulting card into `el` (an assistant bubble); records the output on that message. */
 async function generateFile(request, el, msg) {
@@ -526,7 +535,8 @@ async function generateFile(request, el, msg) {
     holder.innerHTML = fileCardHtml(o); wireFileCards(holder);
     if (msg) { msg.outputs = [...(msg.outputs || []), o.id]; await autosave(); }
     toast(`${o.title} is ready — ${o.files.length > 1 ? "client copy and cited copy" : "one file"}.`);
-    renderFilesPane(o.id).catch(() => {}); openFilesTab(o.id);
+    if (!$("#files-pane").hidden) renderFilesPane(o.id).catch(() => {}); else $("#file-count").textContent = "";
+    await openFilePreview(o);
     return o;
   } catch (e) { holder.innerHTML = fileCardHtml({ title: request.title, error: e.message }, "error"); scrollThread(); }
 }
@@ -540,7 +550,7 @@ async function replyToFile(r, el, msg) {
   try {
     if (state.session && !state.session.id) await saveSession(true);
     const o = await api("/api/outputs/from-text", { method: "POST", body: { title: v.title, markdown: r.text, citations: r.citations || [], format: v.format, session_id: state.session && state.session.id, basis: r.basis } });
-    holder.innerHTML = fileCardHtml(o); wireFileCards(holder); if (msg) { msg.outputs = [...(msg.outputs || []), o.id]; await autosave(); } openFilesTab(o.id);
+    holder.innerHTML = fileCardHtml(o); wireFileCards(holder); if (msg) { msg.outputs = [...(msg.outputs || []), o.id]; await autosave(); } await openFilePreview(o);
   } catch (e) { holder.innerHTML = fileCardHtml({ title: v.title, error: e.message }, "error"); }
 }
 /** The 🗎 button: describe the file in a small form (the chat can do the same in plain words). */
@@ -570,14 +580,14 @@ async function renderFilesPane(selectId) {
   if (selectId) state.fileSel = selectId; if (!list.some((o) => o.id === state.fileSel)) state.fileSel = list[0] ? list[0].id : null;
   const sel = list.find((o) => o.id === state.fileSel);
   pane.innerHTML = `<div class="fmeta" style="margin:0 0 8px"><span>${all ? "All files" : "This session's files"}</span><button type="button" class="btn sm" id="files-toggle">${all ? (sid ? "This session only" : "") : "Show all"}</button><span class="sp" style="flex:1"></span><span>Kept ${r.keep_days} days unless marked Keep · <span class="mono" title="${esc(r.dir)}">OUTPUT/</span></span></div>
-    ${list.length ? `<div class="flist">${list.map((o) => { const f = clientFile(o); return `<div class="frow ${o.id === state.fileSel ? "on" : ""} ${o.expired ? "gone" : ""}" data-sel="${o.id}"><span class="fi">${FILE_ICON[o.format] || "📄"}</span><div class="ft"><b>${esc(o.title)}</b><small>${esc(o.type_label)} · ${esc(o.format_label)}${f ? " · " + fmtBytes(f.bytes) : ""} · ${fmtWhen(o.created_at)}${o.expired ? " · expired" : o.keep ? " · kept" : ""}</small></div></div>`; }).join("")}</div>` : `<div class="empty">No files yet. Ask in the chat — “turn this into a memo”, “make a spreadsheet of every deadline” — or click 🗎 by the composer.</div>`}
-    <div class="fprev" id="fprev"></div>`;
+    ${list.length ? `<div class="flist">${list.map((o) => { const f = clientFile(o); return `<div class="frow ${o.id === state.fileSel ? "on" : ""} ${o.expired ? "gone" : ""}" data-sel="${o.id}" title="Open a preview"><span class="fi">${FILE_ICON[o.format] || "📄"}</span><div class="ft"><b>${esc(o.title)}</b><small>${esc(o.type_label)} · ${esc(o.format_label)}${f ? " · " + fmtBytes(f.bytes) : ""} · ${fmtWhen(o.created_at)}${o.expired ? " · expired" : o.keep ? " · kept" : ""}</small></div>${f && f.exists && !o.expired ? `<a class="btn sm" href="/output/${encodeURIComponent(f.name)}?download=1" download title="Download the client copy" data-dl>⬇</a>` : ""}</div>`; }).join("")}</div>` : `<div class="empty">No files yet. Ask in the chat — “turn this into a memo”, “make a spreadsheet of every deadline” — or click 🗎 by the composer.</div>`}`;
   $("#files-toggle").onclick = () => { state.filesAll = !all; renderFilesPane(); };
-  $$("[data-sel]", pane).forEach((row) => (row.onclick = () => { state.fileSel = Number(row.dataset.sel); renderFilesPane(); }));
-  if (sel) renderFilePreview(sel, state.fileVariant || "client");
+  $$("[data-dl]", pane).forEach((a) => (a.onclick = (e) => e.stopPropagation()));
+  $$("[data-sel]", pane).forEach((row) => (row.onclick = guard(() => { state.fileSel = Number(row.dataset.sel); $$(".frow", pane).forEach((x) => x.classList.toggle("on", x === row)); return openFilePreview(list.find((o) => o.id === state.fileSel)); })));
 }
-function renderFilePreview(o, variant) {
-  const box = $("#fprev"); if (!box) return;
+/** The preview body: Client copy / With sources sub-tabs, the file (PDF inline, others as HTML), Keep and Delete. `box` is the floating window's body. */
+function renderFilePreview(o, variant, box) {
+  box = box || $("#pv-body"); if (!box) return;
   const cited = o.files.find((f) => f.variant === "cited"); const client = clientFile(o);
   if (!cited && variant === "cited") variant = "client";
   state.fileVariant = variant;
@@ -585,10 +595,10 @@ function renderFilePreview(o, variant) {
   box.innerHTML = `<div class="subtabs"><button type="button" class="${variant === "client" ? "on" : ""}" data-v="client">Client copy</button>${cited ? `<button type="button" class="${variant === "cited" ? "on" : ""}" data-v="cited">With sources</button>` : `<span class="hint">no sources cited</span>`}<span class="sp"></span>${f && f.exists ? `<a class="btn sm pri" href="/output/${encodeURIComponent(f.name)}?download=1" download>Download ${variant === "cited" ? "cited copy" : "client copy"}</a>` : ""}</div>
     ${!f || !f.exists ? `<div class="empty">This file has expired (files are kept ${state.keepDays || ""} days unless marked Keep).</div>` : o.format === "pdf" ? `<iframe class="fframe" src="/output/${encodeURIComponent(f.name)}" title="${esc(o.title)}"></iframe>` : `<div class="fhtml" id="fhtml">Loading preview…</div>`}
     <div class="fmeta"><span>${basisLabel(o.basis)}</span><span>·</span><label class="chk"><input type="checkbox" id="file-keep" ${o.keep ? "checked" : ""}> Keep (never expires)</label><span class="sp" style="flex:1"></span><button type="button" class="btn sm" id="file-del">Delete</button></div>`;
-  $$("[data-v]", box).forEach((b) => (b.onclick = () => renderFilePreview(o, b.dataset.v)));
-  if (f && f.exists && o.format !== "pdf") fetch(`/api/outputs/${o.id}/preview?variant=${variant}`).then((r) => r.text()).then((h) => { const el = $("#fhtml"); if (el) el.innerHTML = h; }).catch(() => {});
-  $("#file-keep").onchange = guard(async () => { await api(`/api/outputs/${o.id}`, { method: "PATCH", body: { keep: $("#file-keep").checked } }); toast($("#file-keep").checked ? "Kept — this file will not expire." : "This file expires like the others."); renderFilesPane(); });
-  $("#file-del").onclick = guard(async () => { await api(`/api/outputs/${o.id}`, { method: "DELETE" }); toast("Deleted."); state.fileSel = null; renderFilesPane(); $$(`.filecard[data-output="${o.id}"]`).forEach((c) => c.remove()); });
+  $$("[data-v]", box).forEach((b) => (b.onclick = () => renderFilePreview(o, b.dataset.v, box)));
+  if (f && f.exists && o.format !== "pdf") fetch(`/api/outputs/${o.id}/preview?variant=${variant}`).then((r) => r.text()).then((h) => { const el = $("#fhtml", box); if (el) el.innerHTML = h; }).catch(() => {});
+  $("#file-keep", box).onchange = guard(async () => { const keep = $("#file-keep", box).checked; const u = await api(`/api/outputs/${o.id}`, { method: "PATCH", body: { keep } }); o.keep = u.keep; toast(keep ? "Kept — this file will not expire." : "This file expires like the others."); if (!$("#files-pane").hidden) renderFilesPane().catch(() => {}); });
+  $("#file-del", box).onclick = guard(async () => { if (!confirm(`Delete “${o.title}”? This removes the file${o.files.length > 1 ? "s" : ""} from OUTPUT/.`)) return; await api(`/api/outputs/${o.id}`, { method: "DELETE" }); toast("Deleted."); state.fileSel = null; const dlg = $("#preview-dialog"); if (dlg.open) dlg.close(); if (!$("#files-pane").hidden) renderFilesPane().catch(() => {}); $$(`.filecard[data-output="${o.id}"]`).forEach((c) => c.remove()); });
 }
 function basisLabel(b) { return b === "sources" ? "From your sources" : b === "mixed" ? "Sources + general knowledge" : b === "general" ? "General knowledge — not from your sources" : ""; }
 

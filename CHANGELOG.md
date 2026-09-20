@@ -4,6 +4,12 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 
 ## [Unreleased]
 
+### Changed
+- 2026-09-20: **File previews open in a floating window** (Preview on a card,
+  or a row in the Files tab) instead of inside the right drawer; the Files
+  tab is now just the list, with a ⬇ per row. Keep and Delete live in the
+  window; Delete asks first.
+
 ### Added
 - 2026-09-20: `Start_Ai_Data_Depot.sh` — desktop-app launcher for my_mac_app:
   starts the server in the foreground, opens a dedicated browser window,
