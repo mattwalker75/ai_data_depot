@@ -13,7 +13,8 @@
 #   • Starts the AI Data Depot server (in the foreground, output in LOG) and
 #     opens it in a NEW dedicated browser window — its own window, never a
 #     tab in your regular browser.
-#   • Closing that window shuts the server down.
+#   • Closing that window shuts the server down (the browser can take up to a
+#     minute to finish exiting first; "Stopped." confirms it).
 #   • If AI Data Depot is already running (say, started with ./DEPOT.sh),
 #     the launcher just opens a window onto it and leaves it running when the
 #     window is closed.
@@ -176,12 +177,16 @@ if [ -n "${DEPOT_LAUNCHER_TEST:-}" ]; then
 elif [ -n "$CHROME" ]; then
   echo "Opening $URL in a dedicated browser window..."
   echo "(Closing that window will stop the app.)"
+  # The browser's own chatter (updater, crash handler, ML delegates) goes to
+  # /dev/null — it is noise here and buries the launcher's lines.
   "$CHROME" \
     --app="$URL" \
     --user-data-dir="$BROWSER_PROFILE" \
     --no-first-run \
     --disable-background-mode \
-    --no-default-browser-check
+    --no-default-browser-check \
+    >/dev/null 2>&1
+  echo "Window closed."
   # falls through to cleanup() via trap
 else
   echo "No Chromium browser found — opening in your default browser."
