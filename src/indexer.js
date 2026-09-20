@@ -180,9 +180,10 @@ async function indexPathSource(source, progress, { only } = {}) {
     const stale = db.prepare("SELECT id, locator FROM documents WHERE source_id=?").all(source.id).filter((d) => !present.has(d.locator));
     for (const d of stale) db.prepare("DELETE FROM documents WHERE id=?").run(d.id);
   }
-  db.prepare("UPDATE sources SET status=?, last_indexed_at=?, last_error=? WHERE id=?").run(stopRequested ? "stopped" : (failed && !added && !unchanged ? "error" : "ok"), now(), failed ? `${failed} file(s) could not be read` : null, source.id);
+  const remaining = db.prepare("SELECT count(*) AS n FROM documents WHERE source_id=? AND status='error'").get(source.id).n;
+  db.prepare("UPDATE sources SET status=?, last_indexed_at=?, last_error=? WHERE id=?").run(stopRequested ? "stopped" : (remaining && !added && !unchanged && !only ? "error" : "ok"), now(), remaining ? `${remaining} file(s) could not be read` : null, source.id);
   refreshSourceCounts(source.id);
-  return `${added} indexed, ${unchanged} unchanged, ${failed} failed`;
+  return only ? `${added} recovered, ${remaining} still failing` : `${added} indexed, ${unchanged} unchanged, ${failed} failed`;
 }
 
 // ---------------------------------------------------------------- websites
@@ -235,6 +236,36 @@ function indexFiles(opts = {}) {
 function indexWebsites(opts = {}) {
   const list = sourcesOfKind("website", opts);
   return list.map((s) => enqueue("website", s.location, (progress) => indexWebsiteSource(s, progress)));
+}
+/** Retry ONLY the documents of a source that failed last time. Files are
+ * re-read individually; failed web pages are re-fetched one by one. */
+function retryFailed(sourceId) {
+  const db = open();
+  const s = db.prepare("SELECT * FROM sources WHERE id=?").get(sourceId);
+  if (!s) throw new Error("No such source.");
+  const failed = db.prepare("SELECT locator FROM documents WHERE source_id=? AND status='error'").all(sourceId).map((d) => d.locator);
+  if (!failed.length) throw new Error("Nothing to retry — no failed files on this source.");
+  if (s.kind === "path") return enqueue("files", `${s.location} (retry ${failed.length} failed)`, (p) => indexPathSource(s, p, { only: failed }));
+  return enqueue("website", `${s.location} (retry ${failed.length} failed)`, async (progress) => {
+    await assertEmbeddingReady();
+    let done = 0, ok = 0, bad = 0;
+    for (const url of failed) {
+      if (stopRequested) break;
+      progress(done, failed.length, url);
+      try {
+        await crawl(url, { mode: "page", onPage: async (page) => {
+          await storeDocument({ source: s, kind: "web", locator: page.url, title: page.title, mime: page.mime, bytes: page.bytes, pages: page.pages, page_count: page.page_count, ocr_pages: page.ocr_pages, fetched_at: now() });
+          db.prepare("UPDATE documents SET error=? WHERE source_id=? AND locator=? AND status='ok'").run(JSON.stringify({ etag: page.etag, lastModified: page.lastModified, links: page.links.slice(0, 500) }), s.id, page.url);
+          ok++;
+        } });
+      } catch (e) { bad++; markDocError(s, url, "web", url, e.message); }
+      done++;
+    }
+    const remaining = db.prepare("SELECT count(*) AS n FROM documents WHERE source_id=? AND status='error'").get(s.id).n;
+    db.prepare("UPDATE sources SET last_error=? WHERE id=?").run(remaining ? `${remaining} page(s) could not be read` : null, s.id);
+    refreshSourceCounts(s.id);
+    return `${ok} page(s) recovered, ${bad} still failing`;
+  });
 }
 function indexSource(sourceId) {
   const s = open().prepare("SELECT * FROM sources WHERE id=?").get(sourceId);
@@ -314,4 +345,4 @@ function recoverStaleState() {
   if (n) console.warn(`[index] ${n} job(s) were interrupted by a restart`);
 }
 
-module.exports = { sourceErrors, embeddingReady, recoverStaleState, events, indexFiles, indexWebsites, indexSource, stop, current, jobs, startWatchers, stopWatchers, startScheduler, walk };
+module.exports = { retryFailed, sourceErrors, embeddingReady, recoverStaleState, events, indexFiles, indexWebsites, indexSource, stop, current, jobs, startWatchers, stopWatchers, startScheduler, walk };

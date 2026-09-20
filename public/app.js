@@ -360,7 +360,7 @@ async function showSourceErrors(sourceId) {
   const rateLimited = r.groups.some((g) => /429|rate limit|too large/i.test(g.reason));
   const v = await formDialog({ title: `${r.total} file${r.total === 1 ? "" : "s"} could not be read`, submit: "Retry the failed files", cancel: "Close",
     message: `${body}${rateLimited ? `<p class="hint" style="margin-top:10px">Rate-limit and "too large" failures are the provider being busy or a batch being too big — they are retried automatically now, so a Retry should clear them.</p>` : ""}`, onSubmit: async () => {} });
-  if (v) { if (!(await ensureModelReady())) return; await api(`/api/sources/${sourceId}/index`, { method: "POST" }); toast("Retrying — failed files are read again; unchanged ones are skipped."); }
+  if (v) { if (!(await ensureModelReady())) return; await api(`/api/sources/${sourceId}/retry-failed`, { method: "POST" }); toast(`Retrying the ${r.total} failed file${r.total === 1 ? "" : "s"} — only those.`); }
 }
 async function editScope(sourceId) {
   const src = state.bundles.flatMap((b) => b.sources).find((x) => x.id === sourceId); if (!src) return;

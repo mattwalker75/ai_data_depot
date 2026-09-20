@@ -15,7 +15,9 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
   …) are skipped unless the start page is one; the pages-per-website cap
   always applies.
 - 2026-09-19: **"N files could not be read" is now a button** that opens a
-  window listing the failed files grouped by reason, with a Retry.
+  window listing the failed files grouped by reason, with **Retry the failed
+  files** — which re-reads only those files (or re-fetches only those pages),
+  not the whole source, and reports how many were recovered.
 
 ### Fixed
 - 2026-09-19: **Rate limits lost hundreds of files.** A 10,000-file run against

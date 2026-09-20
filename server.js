@@ -84,6 +84,7 @@ app.patch("/api/sources/:id", wrap((req, res) => {
   db.prepare("UPDATE sources SET options=? WHERE id=?").run(JSON.stringify(sourceOptions(req.body.options)), s.id);
   res.json({ ok: true, options: sourceOptions(req.body.options) });
 }));
+app.post("/api/sources/:id/retry-failed", wrap((req, res) => res.json({ job: indexer.retryFailed(Number(req.params.id)) })));
 app.get("/api/sources/:id/errors", wrap((req, res) => res.json(indexer.sourceErrors(Number(req.params.id)))));
 app.delete("/api/sources/:id", wrap((req, res) => { db.prepare("DELETE FROM sources WHERE id=?").run(req.params.id); indexer.startWatchers(); res.json({ ok: true }); }));
 app.post("/api/sources/:id/index", wrap((req, res) => res.json({ job: indexer.indexSource(Number(req.params.id)) })));
