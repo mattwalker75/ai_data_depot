@@ -71,6 +71,17 @@ button, and re-indexing re-embeds unchanged files too.
 Per-source scope (set when adding a website, editable on its row): `linked` (default; same site,
 N hops from the page), `section` (under the page's path), `site`, `page`.
 
+## `output`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `dir` | `./OUTPUT` | Where generated documents are written (relative to `config.json`). |
+| `keep_days` | `30` | At startup, files of documents older than this are deleted unless marked Keep. Only app-generated files are touched. |
+| `context_chunks` | `24` | Passages retrieved for a prose document (a memo needs more than a chat answer). |
+| `max_documents` | `12` | Documents examined, one at a time, when building a table or comparison. |
+
+See [DOCUMENTS.md](DOCUMENTS.md).
+
 ## `appearance`
 
 `theme`: `harbor-light`, `harbor-dark`, `reading-room`, `ledger`, `graphite`, `system`, or the id of

@@ -46,6 +46,9 @@ CREATE TABLE IF NOT EXISTS jobs (
   progress_done INTEGER NOT NULL DEFAULT 0, progress_total INTEGER NOT NULL DEFAULT 0, message TEXT,
   started_at TEXT, finished_at TEXT, error TEXT);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS outputs (
+  id INTEGER PRIMARY KEY, session_id TEXT, title TEXT NOT NULL, type TEXT NOT NULL, format TEXT NOT NULL,
+  basis TEXT, created_at TEXT NOT NULL, keep INTEGER NOT NULL DEFAULT 0, model TEXT NOT NULL, files TEXT NOT NULL);
 `;
 
 function open() {

@@ -74,10 +74,14 @@ the only intended client, but everything is callable with `curl` from the same m
 | `POST /api/sessions/import` | body = an exported session JSON |
 | `GET /api/sessions/:id/export?format=json\|md` | download |
 
+## Generated documents
+
+See [DOCUMENTS.md](DOCUMENTS.md#api) — `/api/outputs…` and `/output/:name`.
+
 ## Chat
 
 `POST /api/chat` — `{ message, history, persona, bundle_ids, mode, document_id? }` → **SSE**
 (`document_id` restricts retrieval to that one document and tells the model so; the ledger
-carries `focus`):
+carries `focus`; `done` also carries `file_request` when the model handed over a document request, or `file_hint` when the message looked like one):
 `token { text }` repeated, then `done { text, citations, ledger, basis, mode }`, or `error { message }`.
 The connection closing on the client side aborts the model request.

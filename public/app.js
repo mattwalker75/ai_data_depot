@@ -347,9 +347,11 @@ function finishAssistant(el, r) {
   const basis = r.basis || (r.ledger && r.ledger.basis) || (r.citations && r.citations.length ? "sources" : "chat");
   const who = el.querySelector(".who"); if (who && !who.querySelector(".basis")) who.insertAdjacentHTML("beforeend", basisPill(basis));
   if (who && !who.querySelector(".copybtn")) { who.insertAdjacentHTML("beforeend", `<button type="button" class="copybtn" title="Copy the answer with its sources">Copy</button>`); who.querySelector(".copybtn").onclick = guard(async () => { await copyText(answerAsMarkdown(r.text, r.citations)); toast("Copied with sources."); }); }
+  if (who && !who.querySelector(".filebtn")) { who.insertAdjacentHTML("beforeend", `<button type="button" class="filebtn" title="Put this reply in a PDF, Word or text file">File</button>`); who.querySelector(".filebtn").onclick = guard(() => replyToFile(r, el, r.message)); }
   el.querySelector(".body").classList.remove("cursor");
   el.querySelector(".body").innerHTML = ledgerHtml(r.ledger) + md(r.text);
   wireCitations(el, r.citations);
+  if (r.outputs && r.outputs.length) { const body = el.querySelector(".body"); for (const id of r.outputs) api(`/api/outputs/${id}`).then((o) => { const h = document.createElement("div"); h.innerHTML = fileCardHtml(o); body.appendChild(h); wireFileCards(h); }).catch(() => {}); }
 }
 function wireCitations(el, citations) {
   el.dataset.citations = JSON.stringify(citations || []);
@@ -366,7 +368,7 @@ async function send() {
   const history = state.session.messages.map((m) => ({ role: m.role, content: m.content }));
   state.session.messages.push({ role: "user", content: text, at: new Date().toISOString() });
   const ctl = new AbortController(); state.streaming = ctl; $("#send-btn").hidden = true; $("#stop-btn").hidden = false;
-  let acc = "";
+  let acc = "", fileRequest = null, fileHint = null;
   try {
     const resp = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: text, history, persona: currentPersona(), bundle_ids: enabledBundleIds(), mode: $("#strict-mode").checked ? "sources-only" : "sources-first", document_id: state.focus ? state.focus.id : null }), signal: ctl.signal });
     if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || `Request failed (${resp.status})`);
@@ -379,12 +381,15 @@ async function send() {
         if (line.startsWith("event:")) ev = line.slice(6).trim();
         else if (line.startsWith("data:")) { const d = JSON.parse(line.slice(5));
           if (ev === "token") { acc += d.text; body.textContent = acc; scrollThread(); }
-          else if (ev === "done") { finishAssistant(el, d); state.lastCitations = d.citations; renderAllSources(d.citations); state.session.messages.push({ role: "assistant", content: d.text, citations: d.citations, ledger: d.ledger, basis: d.basis, at: new Date().toISOString() }); }
+          else if (ev === "done") { const msg = { role: "assistant", content: d.text, citations: d.citations, ledger: d.ledger, basis: d.basis, at: new Date().toISOString() }; state.session.messages.push(msg); finishAssistant(el, { ...d, message: msg }); state.lastCitations = d.citations; renderAllSources(d.citations); fileRequest = d.file_request || null; fileHint = d.file_hint || null; }
           else if (ev === "error") { throw new Error(d.error); } }
       }
     }
     if (state.session.messages.length === 2 && state.session.name === "New session") { state.session.name = text.slice(0, 60); $("#session-name").value = state.session.name; }
     await autosave();
+    const lastMsg = state.session.messages[state.session.messages.length - 1];
+    if (fileRequest) await generateFile(fileRequest, el, lastMsg);
+    else if (fileHint) { const b = document.createElement("button"); b.type = "button"; b.className = "mkfile"; b.textContent = `Make this a file? (${(state.outputTypes && state.outputTypes[fileHint.type] && state.outputTypes[fileHint.type].label) || fileHint.type}, ${(state.outputFormats && state.outputFormats[fileHint.format]) || fileHint.format})`; body.appendChild(b); b.onclick = guard(async () => { b.remove(); await generateFile({ ...fileHint, title: fileHint.title || text.slice(0, 60) }, el, lastMsg); }); }
   } catch (e) {
     if (e.name === "AbortError") { body.classList.remove("cursor"); body.innerHTML = md(acc) + `<p class="hint">Stopped.</p>`; if (acc) state.session.messages.push({ role: "assistant", content: acc, citations: [], at: new Date().toISOString() }); }
     else { body.classList.remove("cursor"); body.innerHTML = `<div class="err">${esc(e.message)}</div>`; state.session.messages.pop(); }
@@ -431,7 +436,99 @@ function renderAllSources(citations) {
   el.innerHTML = citations && citations.length ? citations.map((c) => `<div class="srow" data-n="${c.n}"><span class="n">${c.n}</span><span class="tt" title="${esc(c.locator)}">${esc(c.title)}${c.location ? " · " + esc(c.location) : ""}</span><span class="st">${c.kind === "web" ? "web" : "file"}</span></div>`).join("") : `<div class="empty">The sources the last answer cited will be listed here.</div>`;
   $$(".srow", el).forEach((r) => r.addEventListener("click", () => showCitation(citations.find((c) => c.n === Number(r.dataset.n)), citations)));
 }
-function switchTab(tab) { $$(".dr .tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab)); $("#evidence").hidden = tab !== "passage"; $("#evidence-all").hidden = tab !== "all"; }
+function switchTab(tab) { $$(".dr .tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab)); $("#evidence").hidden = tab !== "passage"; $("#evidence-all").hidden = tab !== "all"; $("#files-pane").hidden = tab !== "files"; if (tab === "files") renderFilesPane().catch((e) => toast(e.message)); }
+
+// ---------------------------------------------------------------- generated files
+const FILE_ICON = { pdf: "📕", docx: "📘", xlsx: "📗", text: "📄" };
+const fmtBytes = (n) => n > 1e6 ? (n / 1e6).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1e3)) + " KB";
+function clientFile(o) { return o.files.find((f) => f.variant === "client") || o.files[0]; }
+/** The card that sits in the thread under the reply that produced the file (also used for a pending or failed generation). */
+function fileCardHtml(o, status) {
+  if (status === "pending") return `<div class="filecard pending"><span class="fi">◌</span><div class="ft"><b>${esc(o.title || "Document")}</b><small>Creating ${esc(o.label || "the file")}… this can take a minute for a spreadsheet</small></div></div>`;
+  if (status === "error") return `<div class="filecard err"><span class="fi">⚠</span><div class="ft"><b>${esc(o.title || "Document")}</b><small>${esc(o.error)}</small></div></div>`;
+  const f = clientFile(o); const gone = o.expired || !f || !f.exists;
+  return `<div class="filecard" data-output="${o.id}"><span class="fi">${FILE_ICON[o.format] || "📄"}</span><div class="ft"><b title="${esc(o.title)}">${esc(o.title)}</b><small>${esc(o.type_label)} · ${esc(o.format_label)}${f ? " · " + fmtBytes(f.bytes) : ""}${o.files.length > 1 ? " · client copy + cited copy" : ""}${gone ? " · expired" : ""}</small></div>
+    <div class="fa">${gone ? "" : `<button type="button" class="btn sm" data-preview="${o.id}">Preview</button><a class="btn sm pri" href="/output/${encodeURIComponent(f.name)}?download=1" download>Download</a>`}</div></div>`;
+}
+function wireFileCards(el) { $$("[data-preview]", el).forEach((b) => (b.onclick = () => openFilesTab(Number(b.dataset.preview)))); }
+function openFilesTab(id) { openRightDrawer(); switchTab("files"); state.fileSel = id; renderFilesPane(id).catch((e) => toast(e.message)); }
+/** Run the document pipeline for a request and drop the resulting card into `el` (an assistant bubble); records the output on that message. */
+async function generateFile(request, el, msg) {
+  const body = el.querySelector(".body");
+  const label = `${(state.outputTypes && state.outputTypes[request.type] && state.outputTypes[request.type].label) || request.type || "document"} (${(state.outputFormats && state.outputFormats[request.format]) || request.format || "file"})`;
+  const holder = document.createElement("div"); holder.innerHTML = fileCardHtml({ title: request.title || "Document", label }, "pending"); body.appendChild(holder); scrollThread();
+  try {
+    if (state.session && !state.session.id) await saveSession(true);
+    const history = state.session ? state.session.messages.map((m) => ({ role: m.role, content: m.content })) : [];
+    const o = await api("/api/outputs/generate", { method: "POST", body: { request, session_id: state.session && state.session.id, history, bundle_ids: enabledBundleIds(), document_id: state.focus ? state.focus.id : null, mode: $("#strict-mode").checked ? "sources-only" : "sources-first", persona: currentPersona() } });
+    holder.innerHTML = fileCardHtml(o); wireFileCards(holder);
+    if (msg) { msg.outputs = [...(msg.outputs || []), o.id]; await autosave(); }
+    toast(`${o.title} is ready — ${o.files.length > 1 ? "client copy and cited copy" : "one file"}.`);
+    renderFilesPane(o.id).catch(() => {}); openFilesTab(o.id);
+    return o;
+  } catch (e) { holder.innerHTML = fileCardHtml({ title: request.title, error: e.message }, "error"); scrollThread(); }
+}
+/** Render a reply the user already has as a file (no model call). */
+async function replyToFile(r, el, msg) {
+  const v = await formDialog({ title: "Make this reply a file", submit: "Create", fields: [
+    { id: "title", label: "Title", value: (r.text.match(/^#+\s+(.+)$/m) || [])[1] || (state.session && state.session.name !== "New session" ? state.session.name : "Answer") },
+    { id: "format", label: "Format", type: "select", value: "pdf", options: [{ value: "pdf", label: "PDF" }, { value: "docx", label: "Word" }, { value: "text", label: "Text (Markdown)" }] }] });
+  if (!v) return;
+  const body = el.querySelector(".body"); const holder = document.createElement("div"); holder.innerHTML = fileCardHtml({ title: v.title, label: v.format }, "pending"); body.appendChild(holder);
+  try {
+    if (state.session && !state.session.id) await saveSession(true);
+    const o = await api("/api/outputs/from-text", { method: "POST", body: { title: v.title, markdown: r.text, citations: r.citations || [], format: v.format, session_id: state.session && state.session.id, basis: r.basis } });
+    holder.innerHTML = fileCardHtml(o); wireFileCards(holder); if (msg) { msg.outputs = [...(msg.outputs || []), o.id]; await autosave(); } openFilesTab(o.id);
+  } catch (e) { holder.innerHTML = fileCardHtml({ title: v.title, error: e.message }, "error"); }
+}
+/** The 🗎 button: describe the file in a small form (the chat can do the same in plain words). */
+async function makeFileDialog() {
+  const types = state.outputTypes || {}; const formats = state.outputFormats || {};
+  const v = await formDialog({ title: "Make a file", submit: "Create", message: "From this conversation and your enabled sources. You can also just ask in the chat: “turn this into a memo”, “make a spreadsheet of every deadline”.", fields: [
+    { id: "type", label: "What kind of document", type: "select", value: "summary", options: Object.entries(types).map(([k, t]) => ({ value: k, label: t.label })) },
+    { id: "format", label: "Format", type: "select", value: "pdf", options: Object.entries(formats).map(([k, l]) => ({ value: k, label: l })), help: "Spreadsheets suit tables and checklists; memos and summaries suit PDF or Word." },
+    { id: "title", label: "Title", placeholder: "e.g. Henderson — Q1 estimated payment" },
+    { id: "brief", label: "What it should contain", placeholder: "The more specific, the better the file." }],
+    onSubmit: (x) => { if (!x.title) throw new Error("Give the document a title."); const t = types[x.type]; if (t && !t.formats.includes(x.format)) throw new Error(`A ${t.label.toLowerCase()} can be ${t.formats.map((f) => formats[f]).join(", ")} — not ${formats[x.format]}.`); } });
+  if (!v) return;
+  if (!state.session) state.session = newSessionObject();
+  $("#welcome") && $("#welcome").remove();
+  const el = appendAssistant(); el.querySelector(".body").classList.remove("cursor"); el.querySelector(".body").innerHTML = `<p>Making <b>${esc(v.title)}</b>.</p>`;
+  const msg = { role: "assistant", content: `Making "${v.title}" (${(types[v.type] || {}).label || v.type}, ${formats[v.format] || v.format}).`, citations: [], at: new Date().toISOString() };
+  state.session.messages.push(msg);
+  await generateFile({ type: v.type, format: v.format, title: v.title, brief: v.brief }, el, msg);
+}
+/** The Files tab: this session's files (or all), the selected one previewed as client copy / with sources. */
+async function renderFilesPane(selectId) {
+  const pane = $("#files-pane"); if (!pane) return;
+  const sid = state.session && state.session.id; const all = state.filesAll || !sid;
+  const r = await api(`/api/outputs${all ? "" : "?session=" + encodeURIComponent(sid)}`);
+  state.outputTypes = r.types; state.outputFormats = r.formats;
+  const list = r.outputs; $("#file-count").textContent = list.length ? `(${list.length})` : "";
+  if (selectId) state.fileSel = selectId; if (!list.some((o) => o.id === state.fileSel)) state.fileSel = list[0] ? list[0].id : null;
+  const sel = list.find((o) => o.id === state.fileSel);
+  pane.innerHTML = `<div class="fmeta" style="margin:0 0 8px"><span>${all ? "All files" : "This session's files"}</span><button type="button" class="btn sm" id="files-toggle">${all ? (sid ? "This session only" : "") : "Show all"}</button><span class="sp" style="flex:1"></span><span>Kept ${r.keep_days} days unless marked Keep · <span class="mono" title="${esc(r.dir)}">OUTPUT/</span></span></div>
+    ${list.length ? `<div class="flist">${list.map((o) => { const f = clientFile(o); return `<div class="frow ${o.id === state.fileSel ? "on" : ""} ${o.expired ? "gone" : ""}" data-sel="${o.id}"><span class="fi">${FILE_ICON[o.format] || "📄"}</span><div class="ft"><b>${esc(o.title)}</b><small>${esc(o.type_label)} · ${esc(o.format_label)}${f ? " · " + fmtBytes(f.bytes) : ""} · ${fmtWhen(o.created_at)}${o.expired ? " · expired" : o.keep ? " · kept" : ""}</small></div></div>`; }).join("")}</div>` : `<div class="empty">No files yet. Ask in the chat — “turn this into a memo”, “make a spreadsheet of every deadline” — or click 🗎 by the composer.</div>`}
+    <div class="fprev" id="fprev"></div>`;
+  $("#files-toggle").onclick = () => { state.filesAll = !all; renderFilesPane(); };
+  $$("[data-sel]", pane).forEach((row) => (row.onclick = () => { state.fileSel = Number(row.dataset.sel); renderFilesPane(); }));
+  if (sel) renderFilePreview(sel, state.fileVariant || "client");
+}
+function renderFilePreview(o, variant) {
+  const box = $("#fprev"); if (!box) return;
+  const cited = o.files.find((f) => f.variant === "cited"); const client = clientFile(o);
+  if (!cited && variant === "cited") variant = "client";
+  state.fileVariant = variant;
+  const f = variant === "cited" ? cited : client;
+  box.innerHTML = `<div class="subtabs"><button type="button" class="${variant === "client" ? "on" : ""}" data-v="client">Client copy</button>${cited ? `<button type="button" class="${variant === "cited" ? "on" : ""}" data-v="cited">With sources</button>` : `<span class="hint">no sources cited</span>`}<span class="sp"></span>${f && f.exists ? `<a class="btn sm pri" href="/output/${encodeURIComponent(f.name)}?download=1" download>Download ${variant === "cited" ? "cited copy" : "client copy"}</a>` : ""}</div>
+    ${!f || !f.exists ? `<div class="empty">This file has expired (files are kept ${state.keepDays || ""} days unless marked Keep).</div>` : o.format === "pdf" ? `<iframe class="fframe" src="/output/${encodeURIComponent(f.name)}" title="${esc(o.title)}"></iframe>` : `<div class="fhtml" id="fhtml">Loading preview…</div>`}
+    <div class="fmeta"><span>${basisLabel(o.basis)}</span><span>·</span><label class="chk"><input type="checkbox" id="file-keep" ${o.keep ? "checked" : ""}> Keep (never expires)</label><span class="sp" style="flex:1"></span><button type="button" class="btn sm" id="file-del">Delete</button></div>`;
+  $$("[data-v]", box).forEach((b) => (b.onclick = () => renderFilePreview(o, b.dataset.v)));
+  if (f && f.exists && o.format !== "pdf") fetch(`/api/outputs/${o.id}/preview?variant=${variant}`).then((r) => r.text()).then((h) => { const el = $("#fhtml"); if (el) el.innerHTML = h; }).catch(() => {});
+  $("#file-keep").onchange = guard(async () => { await api(`/api/outputs/${o.id}`, { method: "PATCH", body: { keep: $("#file-keep").checked } }); toast($("#file-keep").checked ? "Kept — this file will not expire." : "This file expires like the others."); renderFilesPane(); });
+  $("#file-del").onclick = guard(async () => { await api(`/api/outputs/${o.id}`, { method: "DELETE" }); toast("Deleted."); state.fileSel = null; renderFilesPane(); $$(`.filecard[data-output="${o.id}"]`).forEach((c) => c.remove()); });
+}
+function basisLabel(b) { return b === "sources" ? "From your sources" : b === "mixed" ? "Sources + general knowledge" : b === "general" ? "General knowledge — not from your sources" : ""; }
 
 // ---------------------------------------------------------------- sessions
 function newSessionObject() { return { id: null, name: "New session", persona: currentPersona(), messages: [], bundles: state.bundles.filter((b) => b.enabled).map((b) => b.name) }; }
@@ -442,7 +539,8 @@ function loadSessionIntoUi(s) {
   if (!s.messages.length) { t.innerHTML = `<div class="welcome" id="welcome"><h2>Ask about your sources</h2><p>Ask anything. When your sources (the bundles turned on in the Reading-from drawer) can answer, they are used and cited; anything from general knowledge is labelled. Tick <b>Sources only</b> to refuse everything else.</p><p class="hint" id="welcome-hint"></p></div>`; renderWelcome(); }
   $("#strict-mode").checked = s.mode === "sources-only" || (!s.mode && state.config.chat.mode === "sources-only");
   setFocus(s.focus || null);
-  for (const m of s.messages) { if (m.role === "user") appendUser(m.content); else { const el = appendAssistant(); finishAssistant(el, { text: m.content, citations: m.citations || [], ledger: m.ledger, basis: m.basis, notFound: false }); } }
+  for (const m of s.messages) { if (m.role === "user") appendUser(m.content); else { const el = appendAssistant(); finishAssistant(el, { text: m.content, citations: m.citations || [], ledger: m.ledger, basis: m.basis, notFound: false, outputs: m.outputs || [], message: m }); } }
+  state.fileSel = null; if (!$("#files-pane").hidden) renderFilesPane().catch(() => {});
   const last = [...s.messages].reverse().find((m) => m.role === "assistant" && m.citations && m.citations.length); state.lastCitations = last ? last.citations : []; renderAllSources(state.lastCitations);
   if (Array.isArray(s.bundles) && s.bundles.length) applyBundleNames(s.bundles);
   showView("chat");
@@ -832,6 +930,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#new-persona-btn").addEventListener("click", () => editPersona({ id: null, name: "", description: "", prompt: "", builtin: false }, true));
   $$("#smenu button").forEach((b) => b.addEventListener("click", () => { state.sec = b.dataset.sec; $$("#smenu button").forEach((x) => x.classList.toggle("on", x === b)); renderSettings().catch((e) => toast(e.message)); }));
   try { await refresh(); } catch (e) { toast("Could not reach the server: " + e.message, 8000); return; }
+  $("#file-btn").onclick = guard(makeFileDialog);
+  api("/api/outputs").then((r) => { state.outputTypes = r.types; state.outputFormats = r.formats; state.keepDays = r.keep_days; }).catch(() => {});
   $("#focus-btn").onclick = guard(async () => { if (state.focus) { setFocus(null); toast("Back to all enabled bundles."); return; } await pickDocument(); });
   state.session = newSessionObject(); renderPersonaSelect(); $("#persona-select").value = store.get("persona", "general");
   $("#strict-mode").checked = state.config.chat.mode === "sources-only";

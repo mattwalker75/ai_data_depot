@@ -4,6 +4,23 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 
 ## [Unreleased]
 
+### Added
+- 2026-09-20: **Generated documents.** Ask in the chat for a memo, summary,
+  checklist, spreadsheet, comparison or anything free-form ("write me a poem
+  about flowers and save it as a PDF") and the file is made: the model hands
+  the request to the app instead of writing it inline, the type drives the
+  prompt and the retrieval (tables are built document by document in two
+  passes), and the file is rendered with pdfkit / docx / SheetJS into
+  `OUTPUT/`. Two copies whenever anything was cited — a clean client copy and
+  a cited copy with a Sources section — previewed in the new **Files** tab of
+  the right drawer with a download each; a card under the reply links to it.
+  🗎 beside the composer is the same as a form; **File** under a reply saves
+  that reply as-is; a "Make this a file?" button appears when a message
+  clearly asked for one but the model did not hand it over. Files not marked
+  Keep are deleted at startup after `output.keep_days` (30); only files the
+  app generated are ever touched. Chat modes apply (Sources only refuses what
+  the sources cannot support). New dependencies: `pdfkit`, `docx`.
+
 ### Fixed
 - 2026-09-20: **"Unsupported parameter: 'max_tokens'… Use 'max_completion_tokens'".**
   Newer OpenAI models reject `max_tokens`. The first reply refused this way

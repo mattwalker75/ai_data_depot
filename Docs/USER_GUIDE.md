@@ -75,6 +75,23 @@ numbered *Sources* list (title, page, file path or address) ready to paste into 
 passage highlighted; ‹ › walk through the document's pages. Other file types show the passage
 text.
 
+## 3b · Make a file
+
+Ask for one in the chat — *"turn this into a memo for the Hendersons"*, *"make a spreadsheet of
+every deadline in this file"*, *"write me a poem about flowers and save it as a PDF"*. The reply
+acknowledges it, a card appears while the file is made, then shows **Preview** and **Download**.
+The **Files** tab in the right drawer lists this session's files (or all) and previews the
+selected one as *Client copy* (clean) and *With sources* (citations and a Sources section), each
+with its own download. Word and Excel preview as text; the download is the real file.
+
+Kinds: memo/letter, summary/briefing, checklist, table/data extract (Excel by default; built
+document by document so nothing is skipped), comparison, and free-form for anything else.
+Formats: PDF, Word, Excel (tables and checklists), text. The 🗎 button next to the composer is the
+same thing as a form; **File** under any reply saves that reply as-is.
+
+Files live in `OUTPUT/` and are deleted after 30 days unless you tick **Keep** — the card then
+says *expired*. Delete removes a file at once. Details: [DOCUMENTS.md](DOCUMENTS.md).
+
 ## 4 · Personas
 
 A persona sets voice and focus (Tax Specialist, Researcher, Legal, Analyst, Tutor, Concise,
