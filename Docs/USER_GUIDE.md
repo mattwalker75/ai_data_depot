@@ -4,6 +4,23 @@ AI Data Depot answers questions from **your** material — folders on this compu
 you name — and shows you exactly where each answer came from. It is not a search engine and
 will not wander the internet.
 
+## Starting it as a desktop app
+
+`Start_Ai_Data_Depot.sh` (in the app folder) starts the server and opens AI Data Depot in its
+own window — not a tab in your browser; closing that window stops the app. Run it from a
+terminal, or make it a double-clickable `.app` for your Desktop or Applications folder with
+[my_mac_app](https://github.com/mattwalker75/my_mac_app):
+
+```sh
+mk_mac_app.py --name "AI Data Depot" --script ~/Desktop/REPOs/ai_data_depot/Start_Ai_Data_Depot.sh --emoji 🗄️
+```
+
+If the app is already running (started with `./DEPOT.sh`), the launcher just opens a window
+onto it and leaves it running afterwards. The port is read from `config.json`, so changing it
+in Settings needs no edit to the launcher. Requirements: `./INSTALL_APP.sh` run once, and a
+Chromium-based browser (Chrome, Edge, Brave or Arc) for the dedicated window — otherwise your
+default browser opens a tab.
+
 ## The window
 
 - **Rail (left edge)**: Chat, Sources, Personas, Sessions, and Settings at the bottom. A pulsing

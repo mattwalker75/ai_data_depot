@@ -24,6 +24,11 @@ in which case nothing leaves the machine.
 
 `./DEPOT.sh --help` and `./INSTALL_APP.sh --help` list every flag with examples.
 
+**As a desktop app:** `Start_Ai_Data_Depot.sh` starts the server and opens it in its own
+window; closing the window stops it. Turn it into a double-clickable `.app` with
+[my_mac_app](https://github.com/mattwalker75/my_mac_app):
+`mk_mac_app.py --name "AI Data Depot" --script /path/to/ai_data_depot/Start_Ai_Data_Depot.sh --emoji 🗄️`.
+
 ## In one paragraph
 
 Group folders and websites into **bundles** and tick the ones a question may use. **Index**

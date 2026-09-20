@@ -4,6 +4,12 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 
 ## [Unreleased]
 
+### Added
+- 2026-09-20: `Start_Ai_Data_Depot.sh` — desktop-app launcher for my_mac_app:
+  starts the server in the foreground, opens a dedicated browser window,
+  stops the server when the window closes; reuses (and leaves running) an
+  instance that is already up; reads the port from config.json.
+
 ### Fixed
 - 2026-09-20: **File cards disappeared after a reload** when the file had
   been requested in chat or made with *File* on an earlier reply: saving the
