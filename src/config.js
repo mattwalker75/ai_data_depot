@@ -53,7 +53,7 @@ const DEFAULTS = {
     _custom_note: "Your own colour themes: {id, name, dark, tokens:{bg, panel, ink, mute, line, acc, accInk, accSoft, accText, nav, navtxt, user, mark}}. Settings → Appearance edits these.",
     custom_themes: [] },
   output: { _note: "Generated documents (memos, summaries, spreadsheets…) are written here as files; dir is relative to config.json. Files of documents not marked Keep are deleted at startup once older than keep_days.",
-            dir: "./OUTPUT", keep_days: 30, context_chunks: 24, max_documents: 12 },
+            dir: "./OUTPUT", keep_days: 30, auto_preview: true, context_chunks: 24, max_documents: 12 },
   chat: { _mode_note: "sources-first: converse normally, use the sources when relevant, label anything answered from general knowledge. sources-only: refuse anything the sources do not support (the strict mode). The Chat page can switch per conversation.",
           mode: "sources-first", show_reasoning_ledger: true, not_found_phrase: "Not in your sources", general_marker: "From general knowledge, not your sources:" },
 };

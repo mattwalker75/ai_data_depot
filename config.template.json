@@ -124,9 +124,10 @@
     }
   },
   "output": {
-    "_note": "Generated documents (memos, summaries, spreadsheets...) are written here as files; dir is relative to this file. Files of documents not marked Keep are deleted at startup once older than keep_days. context_chunks = passages handed to the model for a prose document; max_documents = documents examined for a table.",
+    "_note": "Generated documents (memos, summaries, spreadsheets...) are written here as files; dir is relative to this file. Files of documents not marked Keep are deleted at startup once older than keep_days. auto_preview = open a file in the preview window as soon as it is created. context_chunks = passages handed to the model for a prose document; max_documents = documents examined for a table.",
     "dir": "./OUTPUT",
     "keep_days": 30,
+    "auto_preview": true,
     "context_chunks": 24,
     "max_documents": 12
   },

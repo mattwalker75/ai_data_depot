@@ -76,7 +76,8 @@ N hops from the page), `section` (under the page's path), `site`, `page`.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `dir` | `./OUTPUT` | Where generated documents are written (relative to `config.json`). |
-| `keep_days` | `30` | At startup, files of documents older than this are deleted unless marked Keep. Only app-generated files are touched. |
+| `keep_days` | `30` | At startup, files of documents older than this are deleted unless marked Keep. Only app-generated files are touched. Also in Settings → General. |
+| `auto_preview` | `true` | Open the preview window as soon as a file is created. Off = just the card under the reply; Preview still opens it. Settings → General. |
 | `context_chunks` | `24` | Passages retrieved for a prose document (a memo needs more than a chat answer). |
 | `max_documents` | `12` | Documents examined, one at a time, when building a table or comparison. |
 

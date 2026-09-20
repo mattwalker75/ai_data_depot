@@ -4,6 +4,11 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 
 ## [Unreleased]
 
+### Added
+- 2026-09-20: Settings → General → **Generated files**: whether a file opens
+  in the preview window as soon as it is created (`output.auto_preview`,
+  default on) and how many days files are kept (`output.keep_days`).
+
 ### Changed
 - 2026-09-20: **File previews open in a floating window** (Preview on a card,
   or a row in the Files tab) instead of inside the right drawer; the Files

@@ -133,8 +133,9 @@ report) and **Import**.
   your own theme.
 - **Indexing · Files / Websites** — OCR, size limits, pages per site, schedule.
 - **General** — port, listen address, data folder (restart to apply), *Reload config.json* if you
-  edited it by hand, **Compact the database** to reclaim space after removing sources, and
-  **Backups**.
+  edited it by hand, **Compact the database** to reclaim space after removing sources,
+  **Generated files** (open a preview automatically when a file is created; how many days files
+  are kept), and **Backups**.
 
 ## 7 · Backups
 

@@ -513,6 +513,8 @@ function fileCardHtml(o, status) {
     <div class="fa">${gone ? "" : `<button type="button" class="btn sm" data-preview="${o.id}">Preview</button><a class="btn sm pri" href="/output/${encodeURIComponent(f.name)}?download=1" download>Download</a>`}</div></div>`;
 }
 function wireFileCards(el) { $$("[data-preview]", el).forEach((b) => (b.onclick = guard(() => openFilePreview(Number(b.dataset.preview))))); }
+/** Settings → General → "Open a preview when a file is created" (config output.auto_preview). */
+function autoPreview() { const o = state.config && state.config.output; return !o || o.auto_preview !== false; }
 /** Preview = a floating window over the page (the Files tab is only the list). */
 async function openFilePreview(idOrRecord) {
   const o = typeof idOrRecord === "object" ? idOrRecord : await api(`/api/outputs/${idOrRecord}`);
@@ -536,7 +538,7 @@ async function generateFile(request, el, msg) {
     if (msg) { msg.outputs = [...(msg.outputs || []), o.id]; await autosave(); }
     toast(`${o.title} is ready — ${o.files.length > 1 ? "client copy and cited copy" : "one file"}.`);
     if (!$("#files-pane").hidden) renderFilesPane(o.id).catch(() => {}); else $("#file-count").textContent = "";
-    await openFilePreview(o);
+    if (autoPreview()) await openFilePreview(o);
     return o;
   } catch (e) { holder.innerHTML = fileCardHtml({ title: request.title, error: e.message }, "error"); scrollThread(); }
 }
@@ -550,7 +552,7 @@ async function replyToFile(r, el, msg) {
   try {
     if (state.session && !state.session.id) await saveSession(true);
     const o = await api("/api/outputs/from-text", { method: "POST", body: { title: v.title, markdown: r.text, citations: r.citations || [], format: v.format, session_id: state.session && state.session.id, basis: r.basis } });
-    holder.innerHTML = fileCardHtml(o); wireFileCards(holder); if (msg) { msg.outputs = [...(msg.outputs || []), o.id]; await autosave(); } await openFilePreview(o);
+    holder.innerHTML = fileCardHtml(o); wireFileCards(holder); if (msg) { msg.outputs = [...(msg.outputs || []), o.id]; await autosave(); } if (autoPreview()) await openFilePreview(o);
   } catch (e) { holder.innerHTML = fileCardHtml({ title: v.title, error: e.message }, "error"); }
 }
 /** The 🗎 button: describe the file in a small form (the chat can do the same in plain words). */
@@ -903,6 +905,11 @@ async function renderSettings() {
       <div class="card"><div class="ct">Storage</div>
       <p id="g-stats" class="hint">Loading…</p>
       <div class="row wide" style="display:flex;gap:8px;align-items:center"><button class="btn" id="g-compact">Compact the database</button><span class="hint">Returns space freed by removed or re-indexed sources to disk. Takes a moment; wait for indexing to finish first.</span></div></div>
+      <div class="card"><div class="ct">Generated files</div>
+      <div class="row"><label>Open a preview when a file is created</label><span class="chk"><input type="checkbox" id="g-autoprev" ${(state.config.output || {}).auto_preview !== false ? "checked" : ""}></span></div>
+      <div class="row"><label>Keep files for (days)</label><input class="fld" id="g-keep" type="number" min="1" max="3650" value="${(state.config.output || {}).keep_days ?? 30}"></div>
+      <div class="row wide hint">Files not marked Keep are removed at startup once older than this. The Preview button on a file card always works, whatever the first setting.</div>
+      <div class="row wide" style="display:flex;gap:8px"><button class="btn pri" id="g-files-save">Save</button></div></div>
       <div class="card"><div class="ct">Backups</div>
       <p class="hint">A backup is small: your bundles and <i>where</i> their sources live (folder paths and website addresses — bookmarks, not copies), saved sessions, your personas, and settings without API keys. The files themselves and the index are never included; after restoring, put the folders back where they were and re-index.</p>
       <div class="row wide" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn pri" id="g-backup">Back up now</button><label class="btn" for="g-restore-file" style="cursor:pointer">Restore from a backup…</label><input type="file" id="g-restore-file" accept=".zip" hidden><span class="hint">Backups are kept in <span class="mono">${esc(state.meta.data_dir)}/backups</span>; download one to keep it elsewhere.</span></div>
@@ -966,6 +973,7 @@ async function renderSettings() {
   }
   $("#f-save") && ($("#f-save").onclick = guard(async () => { await api("/api/settings", { method: "PUT", body: { indexing: { files: { watch: $("#f-watch").checked, ocr: $("#f-ocr").checked, ocr_min_chars_per_page: Number($("#f-ocrmin").value), max_file_mb: Number($("#f-max").value), chunk_chars: Number($("#f-chunk").value), extensions: $("#f-ext").value.split(/[\s,]+/).filter(Boolean).map((e) => (e.startsWith(".") ? e : "." + e).toLowerCase()) } } } }); toast("Saved."); await renderSettings(); }));
   $("#w-save") && ($("#w-save").onclick = guard(async () => { await api("/api/settings", { method: "PUT", body: { indexing: { websites: { max_pages_per_site: Number($("#w-cap").value), max_depth: Number($("#w-depth").value), recheck_hours: Number($("#w-hours").value), delay_ms: Number($("#w-delay").value), respect_robots: $("#w-robots").checked } } } }); toast("Saved."); await renderSettings(); }));
+  $("#g-files-save") && ($("#g-files-save").onclick = guard(async () => { await api("/api/settings", { method: "PUT", body: { output: { auto_preview: $("#g-autoprev").checked, keep_days: Math.max(1, Number($("#g-keep").value) || 30) } } }); toast("Saved."); await refresh(); await renderSettings(); }));
   $("#g-save") && ($("#g-save").onclick = guard(async () => { const r = await api("/api/settings", { method: "PUT", body: { server: { port: Number($("#g-port").value), host: $("#g-host").value, open_browser: $("#g-open").checked }, data_dir: $("#g-data").value.trim() } }); toast(r.changed_now.length ? "Saved — restart to apply " + r.changed_now.join(", ") : "Saved."); await renderSettings(); }));
   $("#g-reload") && ($("#g-reload").onclick = guard(async () => { await api("/api/settings/reload", { method: "POST" }); await refresh(); await renderSettings(); toast("config.json reloaded."); }));
   $("#ix-files") && ($("#ix-files").onclick = guard(async () => { if (!(await ensureModelReady())) return; await api("/api/index/files", { method: "POST", body: {} }); toast("Re-indexing files."); }));
