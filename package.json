@@ -5,12 +5,15 @@
   "description": "AI Data Depot — a local reference assistant that answers only from the document folders and websites you enable, with citations.",
   "main": "server.js",
   "type": "commonjs",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node server.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
+    "@kenjiuno/msgreader": "^1.28.0",
     "@mozilla/readability": "^0.6.0",
     "@napi-rs/canvas": "^0.1.60",
     "better-sqlite3": "^11.6.0",
@@ -19,6 +22,7 @@
     "express": "^4.21.2",
     "jsdom": "^25.0.1",
     "jszip": "^3.10.1",
+    "mailparser": "^3.9.28",
     "mammoth": "^1.8.0",
     "pdfjs-dist": "^4.10.38",
     "robots-parser": "^3.0.1",

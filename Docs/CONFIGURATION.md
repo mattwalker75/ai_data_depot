@@ -42,7 +42,9 @@ its OpenAI-compatible endpoint; no embedding model — see `embeddings.fallback_
 | `fallback_provider` | `ollama` | Used when the chosen provider has no embedding model. |
 | `batch_size` | `32` | Texts per embedding request. The client halves it automatically when a provider answers "request too large". |
 
-Changing the embedding model changes the vector space: re-index everything afterwards.
+Changing the embedding model changes the vector space. Each document records the model that
+embedded it; when the current model differs, the app shows a banner with a *Re-index everything*
+button, and re-indexing re-embeds unchanged files too.
 
 ## `indexing.files`
 
@@ -53,7 +55,7 @@ Changing the embedding model changes the vector space: re-index everything after
 | `ocr_min_chars_per_page` | `40` | A page with fewer extractable characters is OCR'd. |
 | `max_file_mb` | `50` | Larger files are skipped (reported per document). |
 | `chunk_chars` / `chunk_overlap_chars` | `2800` / `300` | Passage size and overlap. |
-| `extensions` | text, md, html, pdf, docx, xlsx, xls, csv, tsv, json, pptx, rtf | File types indexed. |
+| `extensions` | text, md, html, pdf, docx, xlsx, xls, csv, tsv, json, pptx, rtf, eml, msg, png, jpg, jpeg, webp, bmp, gif | File types indexed. Images need `ocr` on. An existing `config.json` keeps its own list — add the new types in Settings → Indexing · Files if you want them. |
 
 ## `indexing.websites`
 

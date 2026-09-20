@@ -65,6 +65,7 @@ function open() {
   // Columns added after the first release (ALTER is idempotent here).
   try { db.exec("ALTER TABLE sources ADD COLUMN options TEXT"); } catch {}
   try { db.exec("ALTER TABLE documents ADD COLUMN meta TEXT"); } catch {}
+  try { db.exec("ALTER TABLE documents ADD COLUMN embed_model TEXT"); } catch {}
   return db;
 }
 

@@ -128,3 +128,20 @@ test("embeddings: rate limits retry, oversized batches halve, other errors surfa
     await assert.rejects(providers.embed(["x"]), /401/, "a non-transient error is not retried into oblivion");
   } finally { global.fetch = realFetch; }
 });
+
+test("extract: an .eml becomes headers + body; a PDF page renders with highlight boxes for the cited text", async () => {
+  const extract = require("../src/extract");
+  const eml = await extract.extractFile(path.join(__dirname, "fixtures", "note.eml"));
+  assert.equal(eml.title, "Q1 estimated payment");
+  assert.match(eml.pages[0].text, /^From: "?Dana Henderson"? <dana@example.com>/); assert.match(eml.pages[0].text, /Subject: Q1 estimated payment/); assert.match(eml.pages[0].text, /\$4,250 is due April 15/);
+  const pdfBuf = fs.readFileSync(path.join(__dirname, "fixtures", "estimate.pdf"));
+  const pdf = await extract.extractFile(path.join(__dirname, "fixtures", "estimate.pdf"));
+  assert.match(pdf.pages[0].text, /quarterly estimated payment/);
+  const r = await extract.renderPdfPage(pdfBuf, 1, "The quarterly estimated payment is due on April fifteenth each year.");
+  assert.equal(r.page, 1); assert.equal(r.pages, 1); assert.ok(r.png.length > 500, "a PNG came back");
+  assert.ok(r.boxes.length >= 1 && r.boxes.length <= 2, `boxes for the cited lines only, got ${r.boxes.length}`);
+  for (const b of r.boxes) assert.ok(b.x >= 0 && b.y >= 0 && b.x + b.w <= r.width && b.y + b.h <= r.height, "box inside the page");
+  const none = await extract.renderPdfPage(pdfBuf, 1, "");
+  assert.equal(none.boxes.length, 0, "no excerpt, no highlights");
+  await extract.shutdown();
+});

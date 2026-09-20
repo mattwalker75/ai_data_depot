@@ -13,7 +13,10 @@ const MIME = { ".txt": "text/plain", ".md": "text/markdown", ".markdown": "text/
   ".pdf": "application/pdf", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xls": "application/vnd.ms-excel",
   ".csv": "text/csv", ".tsv": "text/tab-separated-values", ".json": "application/json",
-  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", ".rtf": "application/rtf" };
+  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", ".rtf": "application/rtf",
+  ".eml": "message/rfc822", ".msg": "application/vnd.ms-outlook",
+  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".bmp": "image/bmp", ".gif": "image/gif" };
+const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"]);
 
 function supported(file) { return Object.prototype.hasOwnProperty.call(MIME, path.extname(file).toLowerCase()); }
 
@@ -116,6 +119,37 @@ function fromHtml(html) {
   return { pages: [{ text: text.replace(/\n{3,}/g, "\n\n").trim(), label: null }], title };
 }
 
+/** An email becomes one page: the headers a reader cares about, then the body, then the attachment names. */
+function emailPage({ from, to, cc, date, subject, text, attachments }) {
+  const head = [["From", from], ["To", to], ["Cc", cc], ["Date", date], ["Subject", subject]].filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join("\n");
+  const att = attachments && attachments.length ? "\nAttachments: " + attachments.join(", ") : "";
+  return { pages: [{ text: [head, "", (text || "").trim(), att].join("\n").trim(), label: null }], title: subject || null };
+}
+
+async function fromEml(file) {
+  const { simpleParser } = require("mailparser");
+  const m = await simpleParser(fs.readFileSync(file));
+  const addr = (a) => (a && a.text) || "";
+  return emailPage({ from: addr(m.from), to: addr(m.to), cc: addr(m.cc), date: m.date ? m.date.toISOString().slice(0, 10) : "", subject: m.subject,
+    text: m.text || (m.html ? fromHtml(m.html).pages[0].text : ""), attachments: (m.attachments || []).map((a) => a.filename).filter(Boolean) });
+}
+
+function fromMsg(file) {
+  const MsgReader = require("@kenjiuno/msgreader").default;
+  const m = new MsgReader(fs.readFileSync(file)).getFileData();
+  const rcpt = (type) => (m.recipients || []).filter((r) => !type || r.recipType === type).map((r) => r.name || r.email).filter(Boolean).join(", ");
+  const from = m.senderName || m.senderEmail || "";
+  return emailPage({ from, to: rcpt("to") || rcpt(), cc: rcpt("cc"), date: m.messageDeliveryTime || m.clientSubmitTime || "", subject: m.subject,
+    text: m.body || "", attachments: (m.attachments || []).map((a) => a.fileName).filter(Boolean) });
+}
+
+/** A photo or scan: OCR the whole image (receipts, letters, whiteboards). */
+async function fromImage(file) {
+  if (!config.get().indexing.files.ocr) throw new Error("Images need OCR — turn it on in Settings → Indexing · Files");
+  const text = (await ocrImage(fs.readFileSync(file))).trim();
+  return { pages: [{ text, label: null }] };
+}
+
 function fromRtf(s) {
   return s.replace(/\\par[d]?/g, "\n").replace(/\{\\\*[^{}]*\}/g, "").replace(/\\'[0-9a-f]{2}/g, "").replace(/\\[a-z]+-?\d* ?/g, "").replace(/[{}]/g, "").trim();
 }
@@ -136,8 +170,10 @@ async function extractFile(file) {
     case ".pptx": r = await fromPptx(file); break;
     case ".html": case ".htm": r = fromHtml(fs.readFileSync(file, "utf8")); if (r.title) base.title = r.title; break;
     case ".rtf": r = { pages: [{ text: fromRtf(fs.readFileSync(file, "utf8")), label: null }] }; break;
+    case ".eml": r = await fromEml(file); if (r.title) base.title = r.title; break;
+    case ".msg": r = fromMsg(file); if (r.title) base.title = r.title; break;
     case ".json": { const raw = fs.readFileSync(file, "utf8"); let text = raw; try { text = JSON.stringify(JSON.parse(raw), null, 1); } catch {} r = { pages: [{ text, label: null }] }; break; }
-    default: r = { pages: [{ text: fs.readFileSync(file, "utf8"), label: null }] };
+    default: r = IMAGE_EXT.has(ext) ? await fromImage(file) : { pages: [{ text: fs.readFileSync(file, "utf8"), label: null }] };
   }
   base.pages = r.pages.filter((p) => p && p.text && p.text.trim());
   base.page_count = r.pages.length;
@@ -145,7 +181,7 @@ async function extractFile(file) {
     const f = config.get().indexing.files;
     throw new Error(ext === ".pdf"
       ? (f.ocr ? "No readable text — the PDF is empty, encrypted, or its pages could not be read even with OCR" : "No readable text — probably a scanned PDF; turn on OCR in Settings → Indexing · Files")
-      : "No readable text in the file");
+      : IMAGE_EXT.has(ext) ? "No readable text found in the image" : "No readable text in the file");
   }
   return base;
 }
@@ -161,6 +197,41 @@ async function extractWeb(buffer, contentType, url) {
   return { title: r.title || url, mime: "text/html", pages: r.pages.filter((p) => p.text.trim()), page_count: 1, ocr_pages: 0 };
 }
 
+/**
+ * Render one page of a PDF to PNG for the Evidence drawer, with the boxes of
+ * the text items that appear in `excerpt` so the UI can highlight the cited
+ * passage. Matching is by normalised text: an item counts when it is at
+ * least 4 characters, occurs in the excerpt, and a neighbour does too (so
+ * "the" alone never lights up). Returns { page, pages, width, height, png, boxes }.
+ */
+async function renderPdfPage(buffer, pageNo, excerpt, scale = 1.6) {
+  const lib = await pdfjs();
+  const { createCanvas } = require("@napi-rs/canvas");
+  const doc = await lib.getDocument({ data: new Uint8Array(buffer), verbosity: lib.VerbosityLevel.ERRORS, ...PDF_OPTS }).promise;
+  try {
+    const n = Math.min(Math.max(1, pageNo | 0), doc.numPages);
+    const page = await doc.getPage(n);
+    const viewport = page.getViewport({ scale });
+    const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+    const boxes = [];
+    if (excerpt) {
+      const norm = (t) => String(t).toLowerCase().replace(/\s+/g, " ").trim();
+      const ex = norm(excerpt);
+      const items = (await page.getTextContent()).items.filter((it) => "str" in it && it.str.trim());
+      const hit = items.map((it) => { const t = norm(it.str); return t.length >= 4 && ex.includes(t); });
+      items.forEach((it, i) => {
+        if (!hit[i] || !(hit[i - 1] || hit[i + 1])) return;
+        const [x, y] = viewport.convertToViewportPoint(it.transform[4], it.transform[5]);
+        const h = Math.abs(it.height * scale) || 10, w = Math.abs(it.width * scale);
+        boxes.push({ x: Math.round(x), y: Math.round(y - h), w: Math.round(w), h: Math.round(h * 1.15) });
+      });
+    }
+    page.cleanup();
+    return { page: n, pages: doc.numPages, width: canvas.width, height: canvas.height, png: canvas.toBuffer("image/png"), boxes };
+  } finally { await doc.destroy(); }
+}
+
 async function shutdown() { if (tessWorker) { await tessWorker.terminate(); tessWorker = null; } }
 
-module.exports = { extractFile, extractWeb, supported, MIME, shutdown };
+module.exports = { extractFile, extractWeb, renderPdfPage, supported, MIME, shutdown };

@@ -82,23 +82,32 @@ async function assertEmbeddingReady() {
   if (!r.ok) throw new Error(`Indexing needs a working model and none is set up — ${r.error} Open Settings → Models, choose a provider with an embedding model (Ollama with nomic-embed-text, or OpenAI with a key), then run this again. Nothing was read.`);
 }
 
+/** "openai/text-embedding-3-small" — the space every vector in the index must share. */
+function currentEmbedModel() { const p = providers.embeddingProvider(); return `${p.key}/${p.embedding_model}`; }
+
+/** Which embedding models the index was built with, and whether the current one matches. */
+function indexModels() {
+  const rows = open().prepare("SELECT embed_model AS model, count(*) AS documents FROM documents WHERE status='ok' AND embed_model IS NOT NULL GROUP BY embed_model ORDER BY documents DESC").all();
+  let current = null; try { current = currentEmbedModel(); } catch {}
+  return { current, models: rows, mismatch: rows.filter((r) => r.model !== current).reduce((a, r) => a + r.documents, 0) };
+}
+
 async function storeDocument({ source, kind, locator, title, mime, bytes, pages, page_count, ocr_pages, fetched_at }, progressNote) {
   const db = open();
   const f = config.get().indexing.files;
   const text = pages.map((p) => p.text).join("\n");
   const hash = sha(text);
-  const existing = db.prepare("SELECT id, content_hash, status FROM documents WHERE source_id=? AND locator=?").get(source.id, locator);
-  if (existing && existing.content_hash === hash && existing.status === "ok") {
+  const existing = db.prepare("SELECT id, content_hash, status, embed_model FROM documents WHERE source_id=? AND locator=?").get(source.id, locator);
+  // Unchanged text AND embedded with the current model => nothing to do. A
+  // different embedding model means the stored vectors live in another space,
+  // so the document is re-embedded even though its text is the same.
+  if (existing && existing.content_hash === hash && existing.status === "ok" && existing.embed_model === currentEmbedModel()) {
     db.prepare("UPDATE documents SET fetched_at=? WHERE id=?").run(fetched_at || now(), existing.id);
     return { id: existing.id, skipped: true };
   }
   const chunks = chunkPages(pages, { chunkChars: f.chunk_chars, overlapChars: f.chunk_overlap_chars });
   let vectors = [], embModel = null;
-  if (chunks.length) {
-    const p = providers.embeddingProvider();
-    embModel = `${p.key}/${p.embedding_model}`;
-    vectors = await providers.embed(chunks.map((c) => c.text));
-  }
+  if (chunks.length) { embModel = currentEmbedModel(); vectors = await providers.embed(chunks.map((c) => c.text)); }
   const write = db.transaction(() => {
     let docId;
     if (existing) {
@@ -106,11 +115,11 @@ async function storeDocument({ source, kind, locator, title, mime, bytes, pages,
       // Vectors first: the subquery needs the chunk rows that are about to go.
       if (require("./db").vecLoaded) { try { db.prepare(`DELETE FROM chunk_vec WHERE chunk_id IN (SELECT id FROM chunks WHERE document_id=?)`).run(docId); } catch {} }
       db.prepare("DELETE FROM chunks WHERE document_id=?").run(docId);
-      db.prepare("UPDATE documents SET title=?, mime=?, bytes=?, content_hash=?, page_count=?, char_count=?, ocr_pages=?, fetched_at=?, indexed_at=?, status='ok', error=NULL WHERE id=?")
-        .run(title, mime, bytes || null, hash, page_count || null, text.length, ocr_pages || 0, fetched_at || now(), now(), docId);
+      db.prepare("UPDATE documents SET title=?, mime=?, bytes=?, content_hash=?, page_count=?, char_count=?, ocr_pages=?, fetched_at=?, indexed_at=?, status='ok', error=NULL, embed_model=? WHERE id=?")
+        .run(title, mime, bytes || null, hash, page_count || null, text.length, ocr_pages || 0, fetched_at || now(), now(), embModel, docId);
     } else {
-      docId = db.prepare("INSERT INTO documents(source_id, bundle_id, kind, locator, title, mime, bytes, content_hash, page_count, char_count, ocr_pages, fetched_at, indexed_at, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'ok')")
-        .run(source.id, source.bundle_id, kind, locator, title, mime, bytes || null, hash, page_count || null, text.length, ocr_pages || 0, fetched_at || now(), now()).lastInsertRowid;
+      docId = db.prepare("INSERT INTO documents(source_id, bundle_id, kind, locator, title, mime, bytes, content_hash, page_count, char_count, ocr_pages, fetched_at, indexed_at, status, embed_model) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'ok',?)")
+        .run(source.id, source.bundle_id, kind, locator, title, mime, bytes || null, hash, page_count || null, text.length, ocr_pages || 0, fetched_at || now(), now(), embModel).lastInsertRowid;
     }
     const ins = db.prepare("INSERT INTO chunks(document_id, bundle_id, seq, text, location, embedding, embedding_model) VALUES (?,?,?,?,?,?,?)");
     const dim = vectors[0] ? vectors[0].length : 0;
@@ -162,6 +171,7 @@ async function indexPathSource(source, progress, { only } = {}) {
   const exts = config.get().indexing.files.extensions;
   const files = only ? only.filter((f) => exts.includes(path.extname(f).toLowerCase()) && fs.existsSync(f)) : walk(root, exts);
   db.prepare("UPDATE sources SET status='indexing', last_error=NULL WHERE id=?").run(source.id);
+  const embModel = currentEmbedModel();
   let done = 0, added = 0, unchanged = 0, failed = 0;
   progress(0, files.length, `Scanning ${source.location}`);
   for (const file of files) {
@@ -170,8 +180,8 @@ async function indexPathSource(source, progress, { only } = {}) {
     try {
       const st = fs.statSync(file);
       // Cheap pre-check: same size + mtime as last time => skip without reading.
-      const ex = db.prepare("SELECT id, content_hash, status, bytes, fetched_at FROM documents WHERE source_id=? AND locator=?").get(source.id, file);
-      if (ex && ex.status === "ok" && ex.bytes === st.size && ex.fetched_at === st.mtime.toISOString()) { unchanged++; done++; progress(done, files.length, rel); continue; }
+      const ex = db.prepare("SELECT id, content_hash, status, bytes, fetched_at, embed_model FROM documents WHERE source_id=? AND locator=?").get(source.id, file);
+      if (ex && ex.status === "ok" && ex.bytes === st.size && ex.fetched_at === st.mtime.toISOString() && ex.embed_model === embModel) { unchanged++; done++; progress(done, files.length, rel); continue; }
       const doc = await extractFile(file);
       const r = await storeDocument({ source, kind: "file", locator: file, title: doc.title, mime: doc.mime, bytes: st.size, pages: doc.pages, page_count: doc.page_count, ocr_pages: doc.ocr_pages, fetched_at: st.mtime.toISOString() });
       if (r.skipped) unchanged++; else added++;
@@ -383,6 +393,8 @@ function housekeeping() {
       if (n) console.warn(`[index] dropped ${n} duplicate embedding blobs (vectors live in sqlite-vec); Settings → General → Compact reclaims the space`);
     } catch (e) { console.warn("[index] blob dedup skipped:", e.message); }
   }
+  // One-time: documents.embed_model is new; fill it from the chunks (they always carried it).
+  try { db.prepare("UPDATE documents SET embed_model=(SELECT embedding_model FROM chunks WHERE chunks.document_id=documents.id LIMIT 1) WHERE embed_model IS NULL AND status='ok'").run(); } catch {}
   // One-time: conditional-request data used to ride in `error` as JSON on ok rows; move it to `meta`.
   try { db.prepare("UPDATE documents SET meta=error, error=NULL WHERE status='ok' AND error LIKE '{%'").run(); } catch {}
   const orphans = dbmod.sweepOrphanVectors(); if (orphans) console.warn(`[index] swept ${orphans} orphaned vectors`);
@@ -397,4 +409,4 @@ function compact() {
   return { before, after };
 }
 
-module.exports = { compact, housekeeping, forgetConditionalMeta, retryFailed, sourceErrors, embeddingReady, recoverStaleState, events, indexFiles, indexWebsites, indexSource, stop, current, jobs, startWatchers, stopWatchers, startScheduler, walk };
+module.exports = { compact, housekeeping, indexModels, currentEmbedModel, forgetConditionalMeta, retryFailed, sourceErrors, embeddingReady, recoverStaleState, events, indexFiles, indexWebsites, indexSource, stop, current, jobs, startWatchers, stopWatchers, startScheduler, walk };

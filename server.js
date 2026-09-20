@@ -17,6 +17,8 @@ const indexer = require("./src/indexer");
 const personas = require("./src/personas");
 const sessions = require("./src/sessions");
 const chat = require("./src/chat");
+const backup = require("./src/backup");
+const extract = require("./src/extract");
 
 const cfg = config.load();
 const db = open();
@@ -63,6 +65,7 @@ app.get("/api/state", wrap((req, res) => res.json({
   version: VERSION, config: config.redacted(), restart_required: restartNeeded,
   bundles: bundlesWithSources(), personas: personas.list(), sessions: sessions.list(), job: indexer.current(),
   config_path: config.CONFIG_PATH, data_dir: config.dataDir(), sqlite_vec: require("./src/db").vecLoaded,
+  index_models: indexer.indexModels(),
 })));
 
 // ---------------------------------------------------------------- bundles + sources
@@ -109,6 +112,38 @@ app.get("/api/sources/:id/errors", wrap((req, res) => res.json(indexer.sourceErr
 app.delete("/api/sources/:id", wrap((req, res) => { db.prepare("DELETE FROM sources WHERE id=?").run(req.params.id); require("./src/db").sweepOrphanVectors(); indexer.startWatchers(); res.json({ ok: true }); }));
 app.post("/api/sources/:id/index", wrap((req, res) => res.json({ job: indexer.indexSource(Number(req.params.id)) })));
 app.get("/api/bundles/:id/documents", wrap((req, res) => res.json(db.prepare("SELECT id, source_id, kind, locator, title, mime, bytes, page_count, char_count, ocr_pages, indexed_at, status, CASE WHEN status='error' THEN error END AS error FROM documents WHERE bundle_id=? ORDER BY kind, title LIMIT 2000").all(req.params.id))));
+// Documents across the enabled bundles (or given ones), for the "ask about one document" picker.
+app.get("/api/documents", wrap((req, res) => {
+  const q = String(req.query.q || "").trim().toLowerCase();
+  const ids = String(req.query.bundle_ids || "").split(",").map(Number).filter(Boolean);
+  const where = ids.length ? `d.bundle_id IN (${ids.map(() => "?").join(",")})` : "b.enabled=1";
+  const rows = db.prepare(`SELECT d.id, d.kind, d.locator, d.title, d.mime, d.page_count, b.name AS bundle FROM documents d JOIN bundles b ON b.id=d.bundle_id WHERE d.status='ok' AND ${where} AND (? = '' OR lower(d.title) LIKE ? OR lower(d.locator) LIKE ?) ORDER BY d.title LIMIT 300`).all(...ids, q, `%${q}%`, `%${q}%`);
+  res.json(rows);
+}));
+app.get("/api/documents/:id", wrap((req, res) => {
+  const d = db.prepare("SELECT d.id, d.kind, d.locator, d.title, d.mime, d.page_count, d.status, b.name AS bundle FROM documents d JOIN bundles b ON b.id=d.bundle_id WHERE d.id=?").get(req.params.id);
+  if (!d) throw new Error("That document is no longer in the index.");
+  res.json(d);
+}));
+// A rendered PDF page for the Evidence drawer. Only indexed PDFs on disk; the
+// cited chunk's text is used to place highlight boxes. Small in-memory cache.
+const pageCache = new Map();
+app.get("/api/documents/:id/page/:n", wrap(async (req, res) => {
+  const d = db.prepare("SELECT id, kind, locator, mime FROM documents WHERE id=? AND status='ok'").get(req.params.id);
+  if (!d) throw new Error("That document is no longer in the index.");
+  if (d.kind !== "file" || !/pdf/i.test(d.mime || "") || !/\.pdf$/i.test(d.locator)) throw new Error("Only PDF files can be shown as pages.");
+  if (!fs.existsSync(d.locator)) throw new Error("That file is not on this computer any more.");
+  // Highlight from the cited chunk's full text; sessions saved before chunk ids existed send the excerpt instead.
+  const chunk = req.query.chunk ? db.prepare("SELECT text FROM chunks WHERE id=? AND document_id=?").get(req.query.chunk, d.id) : null;
+  const hlText = chunk ? chunk.text : String(req.query.text || "").slice(0, 2000);
+  const key = `${d.id}:${req.params.n}:${req.query.chunk || ""}:${hlText.length}:${fs.statSync(d.locator).mtimeMs}`;
+  let r = pageCache.get(key);
+  if (!r) {
+    r = await extract.renderPdfPage(fs.readFileSync(d.locator), Number(req.params.n) || 1, hlText);
+    pageCache.set(key, r); if (pageCache.size > 24) pageCache.delete(pageCache.keys().next().value);
+  }
+  res.json({ page: r.page, pages: r.pages, width: r.width, height: r.height, boxes: r.boxes, image: "data:image/png;base64," + r.png.toString("base64") });
+}));
 app.get("/api/chunks/:id", wrap((req, res) => {
   const c = db.prepare("SELECT c.*, d.title, d.locator, d.kind FROM chunks c JOIN documents d ON d.id=c.document_id WHERE c.id=?").get(req.params.id);
   if (!c) throw new Error("That passage is no longer in the index.");
@@ -175,6 +210,15 @@ app.put("/api/settings", wrap((req, res) => {
   indexer.startWatchers();
   res.json({ config: config.redacted(), restart_required: restartNeeded, changed_now: r.restart_required });
 }));
+// Backups: bookmarks to the sources, sessions, personas, settings without keys. Never the files or the index.
+app.get("/api/maintenance/backups", wrap((req, res) => res.json(backup.list())));
+app.post("/api/maintenance/backups", wrap(async (req, res) => res.json(await backup.create())));
+app.get("/api/maintenance/backups/:name", wrap((req, res) => res.download(backup.fileFor(req.params.name))));
+app.delete("/api/maintenance/backups/:name", wrap((req, res) => { fs.rmSync(backup.fileFor(req.params.name)); res.json({ ok: true }); }));
+app.post("/api/maintenance/restore", express.raw({ type: () => true, limit: "200mb" }), wrap(async (req, res) => {
+  if (!Buffer.isBuffer(req.body) || !req.body.length) throw new Error("Pick a backup zip first.");
+  const r = await backup.restore(req.body); indexer.startWatchers(); res.json(r);
+}));
 app.post("/api/maintenance/compact", wrap((req, res) => { if (indexer.current()) throw new Error("Wait for indexing to finish first."); res.json(indexer.compact()); }));
 app.get("/api/maintenance/stats", wrap((req, res) => {
   const f = path.join(config.dataDir(), "depot.sqlite"); const size = fs.existsSync(f) ? fs.statSync(f).size : 0;
@@ -206,14 +250,14 @@ app.get("/api/sessions/:id/export", wrap((req, res) => {
 
 // ---------------------------------------------------------------- chat (SSE)
 app.post("/api/chat", wrap(async (req, res) => {
-  const { message, history = [], persona = "general", bundle_ids = [], provider, model, mode } = req.body || {};
+  const { message, history = [], persona = "general", bundle_ids = [], provider, model, mode, document_id } = req.body || {};
   if (!message || !String(message).trim()) throw new Error("Type a question first.");
   const send = sse(res);
   // res 'close' = the client went away. (req 'close' fires as soon as the
   // request body is consumed on modern Node, which is immediately here.)
   let closed = false; res.on("close", () => { closed = true; });
   try {
-    const r = await chat.answer({ message: String(message), history, personaId: persona, bundleIds: bundle_ids.map(Number).filter(Boolean), provider, model, mode, onToken: (t) => { if (!closed) send("token", { text: t }); } });
+    const r = await chat.answer({ message: String(message), history, personaId: persona, bundleIds: bundle_ids.map(Number).filter(Boolean), provider, model, mode, documentId: Number(document_id) || null, onToken: (t) => { if (!closed) send("token", { text: t }); } });
     if (!closed) send("done", { text: r.text, citations: r.citations, ledger: r.ledger, notFound: r.notFound, basis: r.basis, mode: r.mode });
   } catch (e) { if (!closed) send("error", { error: e.message }); }
   res.end();

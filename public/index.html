@@ -54,6 +54,7 @@
         <button class="btn pri" id="save-btn">Save</button>
       </header>
       <div class="notice" id="index-notice" hidden></div>
+      <div class="notice" id="embed-notice" hidden></div>
       <div class="thread" id="thread">
         <div class="welcome" id="welcome">
           <h2>Ask about your sources</h2>
@@ -61,7 +62,9 @@
           <p class="hint" id="welcome-hint"></p>
         </div>
       </div>
+      <div class="focus" id="focus-chip" hidden></div>
       <div class="compose">
+        <button class="btn icon" id="focus-btn" title="Ask about one document — only that document is searched until you clear it" aria-label="Ask about one document">📄</button>
         <textarea id="composer" rows="1" placeholder="Ask anything — your sources are used when they can answer…" aria-label="Your question"></textarea>
         <button class="btn pri" id="send-btn">Send</button>
         <button class="btn" id="stop-btn" hidden>Stop</button>
@@ -72,7 +75,7 @@
     <section class="view" id="view-sources">
       <header class="head"><div class="t">Sources<small>Bundles of folders and websites the assistant may read</small></div><div class="sp"></div>
         <button class="btn" id="index-files-btn">Re-index files</button><button class="btn" id="index-web-btn">Re-index websites</button><button class="btn pri" id="new-bundle-btn2">+ New bundle</button></header>
-      <div class="page"><div class="notice" id="ready-notice" hidden></div><div class="card jobcard" id="jobcard" hidden></div><div id="sources-page" class="stack"></div></div>
+      <div class="page"><div class="notice" id="ready-notice" hidden></div><div class="notice" id="embed-notice-src" hidden></div><div class="card jobcard" id="jobcard" hidden></div><div id="sources-page" class="stack"></div></div>
     </section>
 
     <!-- ================= PERSONAS ================= -->

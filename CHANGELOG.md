@@ -4,6 +4,33 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 
 ## [Unreleased]
 
+### Added
+- 2026-09-20: **Ask about one document.** 📄 next to the composer picks a
+  document from the enabled bundles (or *Ask about this* in the Evidence
+  drawer); only that document is searched until the chip is cleared, the
+  model is told it is answering about one document, and the ledger says so.
+  Saved with the session.
+- 2026-09-20: **Copy an answer with its sources** — hover a reply, *Copy*:
+  Markdown with a numbered Sources list (title, page, path or address).
+- 2026-09-20: **The page, not just the passage.** For a cited PDF the
+  Evidence drawer renders the page with the cited text highlighted and lets
+  you page through the document (`GET /api/documents/:id/page/:n`).
+- 2026-09-20: **Emails and images as sources.** `.eml` and Outlook `.msg`
+  (headers, body, attachment names; the subject is the title) and `.png`
+  `.jpg` `.jpeg` `.webp` `.bmp` `.gif` (read with OCR). New installs get
+  them by default; an existing config.json keeps its own list — add them in
+  Settings → Indexing · Files.
+- 2026-09-20: **Embedding-model mismatch warning.** Each document records
+  the model that embedded it. Switching embedding models shows a banner in
+  Chat and Sources naming both, with *Re-index everything*; re-indexing now
+  re-embeds unchanged files too (before, the unchanged-file shortcut kept
+  the old vectors).
+- 2026-09-20: **Backups.** Settings → General → *Back up now* writes a small
+  zip (bundles and where their sources live — bookmarks, not copies —
+  sessions, personas, settings without API keys) to `data/backups/`, with
+  download, delete and *Restore from a backup…* (merge-only). Source files
+  and the index are deliberately never included.
+
 ### Security
 - 2026-09-20: **Local trust boundary.** Every request must carry a `Host`
   naming this machine (defeats DNS rebinding — a web page cannot reach the

@@ -102,7 +102,15 @@
         ".tsv",
         ".json",
         ".pptx",
-        ".rtf"
+        ".rtf",
+        ".eml",
+        ".msg",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".webp",
+        ".bmp",
+        ".gif"
       ]
     },
     "websites": {

@@ -35,7 +35,7 @@
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const state = { config: null, bundles: [], personas: [], sessions: [], session: null, view: "chat", sec: "models", streaming: null, lastCitations: [], modelsCache: {}, presets: [] };
+const state = { config: null, bundles: [], personas: [], sessions: [], session: null, view: "chat", sec: "models", streaming: null, lastCitations: [], modelsCache: {}, presets: [], focus: null };
 const store = { get(k, d) { try { const v = localStorage.getItem("depot." + k); return v == null ? d : JSON.parse(v); } catch { return d; } }, set(k, v) { try { localStorage.setItem("depot." + k, JSON.stringify(v)); } catch {} } };
 
 /** Transient message at the bottom of the window; the only feedback path for background errors. */
@@ -106,9 +106,9 @@ function openRightDrawer() { wireDrawers.open("r"); }
 /** Pull the whole UI state from the server and re-render everything derived from it (idempotent; called after every mutation). */
 async function refresh() {
   const s = await api("/api/state");
-  Object.assign(state, { config: s.config, bundles: s.bundles, personas: s.personas, sessions: s.sessions, presets: s.presets || state.presets, meta: { version: s.version, config_path: s.config_path, data_dir: s.data_dir, sqlite_vec: s.sqlite_vec, restart_required: s.restart_required } });
+  Object.assign(state, { config: s.config, bundles: s.bundles, personas: s.personas, sessions: s.sessions, presets: s.presets || state.presets, meta: { version: s.version, config_path: s.config_path, data_dir: s.data_dir, sqlite_vec: s.sqlite_vec, restart_required: s.restart_required, index_models: s.index_models } });
   applyTheme(state.config.appearance.theme);
-  renderBundles(); renderPersonaSelect(); renderSessionsMenu(); renderWelcome(); renderIndexNotice();
+  renderBundles(); renderPersonaSelect(); renderSessionsMenu(); renderWelcome(); renderIndexNotice(); renderEmbedNotice();
   if (s.job) showJob({ status: "running", ...s.job }); else if (!$("#jobcard").hidden) showJob(null);
 }
 function enabledBundleIds() { return state.bundles.filter((b) => b.enabled).map((b) => b.id); }
@@ -189,14 +189,18 @@ async function addWebsite(bundleId) {
 }
 /** Pick one item from a list in a sub-window. The search box starts EMPTY so
  * the whole list shows; typing narrows it. Resolves with the item or null. */
-function pickFromList({ title, items, current = "", hint = "" }) {
+/** Searchable list picker. `items` is a static list, or pass `load(q)` (async → items) to let the server narrow a big list as the user types. */
+function pickFromList({ title, items = [], current = "", hint = "", load = null }) {
   return new Promise((resolve) => {
     const dlg = $("#pick-dialog"), list = $("#pick-list"), search = $("#pick-search");
     $("#pick-title").textContent = title; $("#pick-hint").textContent = hint; search.value = "";
     let done = false; const finish = (v) => { if (done) return; done = true; if (dlg.open) dlg.close(); resolve(v); };
-    const render = () => { const q = search.value.trim().toLowerCase(); const shown = items.filter((m) => !q || m.toLowerCase().includes(q));
-      list.innerHTML = shown.map((m) => `<button type="button" data-m="${esc(m)}" class="${m === current ? "on" : ""}">${esc(m)}${m === current ? `<span class="cur">current</span>` : ""}</button>`).join("") || `<div class="hint" style="padding:12px">Nothing matches “${esc(search.value)}”.</div>`;
+    const draw = (shown) => { list.innerHTML = shown.map((m) => `<button type="button" data-m="${esc(m)}" class="${m === current ? "on" : ""}">${esc(m)}${m === current ? `<span class="cur">current</span>` : ""}</button>`).join("") || `<div class="hint" style="padding:12px">Nothing matches “${esc(search.value)}”.</div>`;
       $$("button[data-m]", list).forEach((b) => (b.onclick = () => finish(b.dataset.m))); };
+    let seq = 0, timer = null;
+    const render = () => { const q = search.value.trim().toLowerCase();
+      if (!load) return draw(items.filter((m) => !q || m.toLowerCase().includes(q)));
+      clearTimeout(timer); timer = setTimeout(async () => { const my = ++seq; try { const got = await load(q); if (my === seq) draw(got); } catch (e) { if (my === seq) list.innerHTML = `<div class="hint" style="padding:12px">${esc(e.message)}</div>`; } }, q ? 180 : 0); };
     search.oninput = render; render();
     $("#pick-cancel").onclick = () => finish(null); $(".x", dlg).onclick = () => finish(null); dlg.onclose = () => finish(null);
     dlg.showModal(); search.focus();
@@ -232,6 +236,18 @@ function renderIndexNotice() {
   const n = pending.length;
   el.innerHTML = `<span>⚠ ${n} source${n > 1 ? "s" : ""} in your enabled bundles ${n > 1 ? "are" : "is"} not indexed yet, so the assistant cannot read ${n > 1 ? "them" : "it"}: <b>${pending.slice(0, 3).map((s) => esc(s.location)).join("</b>, <b>")}</b>${n > 3 ? "…" : ""}</span><span class="sp"></span><button class="btn sm pri" id="notice-index">Index now</button>`;
   $("#notice-index").onclick = guard(async () => { if (!(await ensureModelReady())) return; for (const s of pending) await api(`/api/sources/${s.id}/index`, { method: "POST" }); toast("Indexing started."); el.hidden = true; });
+}
+
+/** The index only works in the vector space it was built in. If the embedding model changed, say so in Chat and Sources until everything is re-indexed. */
+function renderEmbedNotice() {
+  const im = state.meta && state.meta.index_models; const els = [$("#embed-notice"), $("#embed-notice-src")].filter(Boolean);
+  if (!im || !im.current || !im.mismatch) { els.forEach((el) => { el.hidden = true; }); return; }
+  const others = im.models.filter((m) => m.model !== im.current).map((m) => `<b>${esc(m.model)}</b> (${m.documents.toLocaleString()} document${m.documents === 1 ? "" : "s"})`).join(", ");
+  for (const el of els) {
+    el.hidden = false;
+    el.innerHTML = `<span>⚠ <b>Different embedding model.</b> Your index was built with ${others}; you are now using <b>${esc(im.current)}</b>. Vectors from different models do not compare, so answers will miss things until you re-index (unchanged files are re-read automatically once you do).</span><span class="sp"></span><button class="btn sm pri" data-reindex-all>Re-index everything</button>`;
+    el.querySelector("[data-reindex-all]").onclick = guard(async () => { if (!(await ensureModelReady())) return; await api("/api/index/files", { method: "POST" }); await api("/api/index/websites", { method: "POST" }); toast("Re-indexing started — watch the Sources page."); });
+  }
 }
 
 // ---------------------------------------------------------------- privacy badge
@@ -292,12 +308,45 @@ function ledgerHtml(l) {
   if (!l || !state.config.chat.show_reasoning_ledger) return "";
   const docs = l.documents.map((d) => `${esc(d.title)} <span style="color:var(--mute)">(${esc(d.bundle)})</span>`).join(", ");
   const used = l.basis === "sources" || l.basis === "mixed";
-  return `<details class="steps"><summary>How I answered</summary>${l.searched.length ? `<span class="ok">Searched ${l.searched.map(esc).join(", ")} — ${l.passages} passages considered${used ? "" : ", none used"}</span>` : `<span class="skip">No bundles were on</span>`}${docs ? `<span class="ok">Drew on ${docs}</span>` : ""}${l.basis === "general" ? `<span class="skip">Answered from the model's general knowledge — your sources did not cover it</span>` : ""}${l.basis === "chat" ? `<span class="skip">Conversational reply — no sources needed</span>` : ""}${l.skipped.length ? `<span class="skip">Skipped ${l.skipped.map(esc).join(", ")} (turned off)</span>` : ""}<span class="skip">${esc(l.persona)} · ${esc(l.model)} · ${esc(l.provider)} · ${l.mode === "sources-only" ? "sources only" : "sources first"}</span></details>`;
+  return `<details class="steps"><summary>How I answered</summary>${l.focus ? `<span class="ok">Asked about one document only: ${esc(l.focus)} — ${l.passages} passages considered${used ? "" : ", none used"}</span>` : l.searched.length ? `<span class="ok">Searched ${l.searched.map(esc).join(", ")} — ${l.passages} passages considered${used ? "" : ", none used"}</span>` : `<span class="skip">No bundles were on</span>`}${docs ? `<span class="ok">Drew on ${docs}</span>` : ""}${l.basis === "general" ? `<span class="skip">Answered from the model's general knowledge — your sources did not cover it</span>` : ""}${l.basis === "chat" ? `<span class="skip">Conversational reply — no sources needed</span>` : ""}${l.skipped.length ? `<span class="skip">Skipped ${l.skipped.map(esc).join(", ")} (turned off)</span>` : ""}<span class="skip">${esc(l.persona)} · ${esc(l.model)} · ${esc(l.provider)} · ${l.mode === "sources-only" ? "sources only" : "sources first"}</span></details>`;
 }
+// ---------------------------------------------------------------- ask about one document
+/** Narrow the conversation to one document (or null to clear). Remembered with the session. */
+function setFocus(doc) {
+  state.focus = doc || null; if (state.session) state.session.focus = state.focus;
+  const chip = $("#focus-chip"), btn = $("#focus-btn");
+  btn.classList.toggle("on", !!doc);
+  if (!doc) { chip.hidden = true; chip.innerHTML = ""; $("#composer").placeholder = "Ask anything — your sources are used when they can answer…"; return; }
+  chip.hidden = false;
+  chip.innerHTML = `📄 Asking about <b title="${esc(doc.locator)}">${esc(doc.title || doc.locator)}</b> only <button type="button" class="x" title="Back to all enabled bundles" aria-label="Clear">✕</button>`;
+  $(".x", chip).onclick = () => { setFocus(null); toast("Back to all enabled bundles."); };
+  $("#composer").placeholder = `Ask about ${doc.title || "this document"}…`;
+}
+/** Picker over the indexed documents of the enabled bundles. */
+async function pickDocument() {
+  const seen = new Map();
+  const label = (d) => { let l = `${d.title || d.locator}  ·  ${d.bundle}`; if (seen.has(l) && seen.get(l).id !== d.id) l += `  (${d.locator.split("/").pop()})`; seen.set(l, d); return l; };
+  const first = await api(`/api/documents`);
+  if (!first.length) throw new Error("No indexed documents in your enabled bundles yet.");
+  const chosen = await pickFromList({ title: "Ask about one document", items: first.map(label), current: state.focus ? label(state.focus) : "",
+    hint: "Type part of a title or file name — only the document you pick will be searched", load: async (q) => (await api(`/api/documents?q=${encodeURIComponent(q)}`)).map(label) });
+  if (chosen) { const d = seen.get(chosen); setFocus({ id: d.id, title: d.title, kind: d.kind, locator: d.locator, bundle: d.bundle }); toast(`Asking about ${d.title || d.locator} only.`); $("#composer").focus(); }
+}
+
+/** Plain-text/Markdown copy of an answer with its numbered sources — for pasting into a memo. */
+function answerAsMarkdown(text, citations) {
+  const src = (citations || []).map((c) => `[${c.n}] ${c.title}${c.location ? ` — ${c.location}` : ""} — ${c.locator}`).join("\n");
+  return text.trim() + (src ? `\n\nSources:\n${src}` : "");
+}
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); } catch { const ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); }
+}
+
 function finishAssistant(el, r) {
   el.classList.toggle("nf", !!r.notFound);
   const basis = r.basis || (r.ledger && r.ledger.basis) || (r.citations && r.citations.length ? "sources" : "chat");
   const who = el.querySelector(".who"); if (who && !who.querySelector(".basis")) who.insertAdjacentHTML("beforeend", basisPill(basis));
+  if (who && !who.querySelector(".copybtn")) { who.insertAdjacentHTML("beforeend", `<button type="button" class="copybtn" title="Copy the answer with its sources">Copy</button>`); who.querySelector(".copybtn").onclick = guard(async () => { await copyText(answerAsMarkdown(r.text, r.citations)); toast("Copied with sources."); }); }
   el.querySelector(".body").classList.remove("cursor");
   el.querySelector(".body").innerHTML = ledgerHtml(r.ledger) + md(r.text);
   wireCitations(el, r.citations);
@@ -319,7 +368,7 @@ async function send() {
   const ctl = new AbortController(); state.streaming = ctl; $("#send-btn").hidden = true; $("#stop-btn").hidden = false;
   let acc = "";
   try {
-    const resp = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: text, history, persona: currentPersona(), bundle_ids: enabledBundleIds(), mode: $("#strict-mode").checked ? "sources-only" : "sources-first" }), signal: ctl.signal });
+    const resp = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: text, history, persona: currentPersona(), bundle_ids: enabledBundleIds(), mode: $("#strict-mode").checked ? "sources-only" : "sources-first", document_id: state.focus ? state.focus.id : null }), signal: ctl.signal });
     if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || `Request failed (${resp.status})`);
     const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = "", ev = null;
     for (;;) {
@@ -348,12 +397,33 @@ function showCitation(c, all) {
   openRightDrawer(); switchTab("passage");
   const ev = $("#evidence");
   const where = [c.bundle, c.location].filter(Boolean).join(" · ");
-  ev.innerHTML = `<div class="doc"><div class="nx" style="margin:0 0 10px"><button class="btn sm" id="ev-prev">‹ Prev</button><button class="btn sm" id="ev-next">Next ›</button><span class="sp" style="flex:1"></span><button class="btn sm pri" id="ev-open">${c.kind === "web" ? "Open page" : "Open file"}</button></div>
-    <div class="t">${esc(c.title)}</div><div class="w">${c.kind === "web" ? `<a href="${esc(c.locator)}" target="_blank" rel="noopener">${esc(c.locator)}</a>` : esc(c.locator)}${where ? " · " + esc(where) : ""}</div><div class="pg">${linkify(esc(c.excerpt))}</div></div>`;
+  const pageNo = c.kind === "file" && /\.pdf$/i.test(c.locator) && /^page (\d+)/.test(c.location || "") ? Number(c.location.match(/^page (\d+)/)[1]) : null;
+  ev.innerHTML = `<div class="doc"><div class="nx" style="margin:0 0 10px"><button class="btn sm" id="ev-prev">‹ Prev</button><button class="btn sm" id="ev-next">Next ›</button><span class="sp" style="flex:1"></span><button class="btn sm" id="ev-focus" title="Only this document is searched until you clear it">Ask about this</button><button class="btn sm pri" id="ev-open">${c.kind === "web" ? "Open page" : "Open file"}</button></div>
+    <div class="t">${esc(c.title)}</div><div class="w">${c.kind === "web" ? `<a href="${esc(c.locator)}" target="_blank" rel="noopener">${esc(c.locator)}</a>` : esc(c.locator)}${where ? " · " + esc(where) : ""}</div>
+    ${pageNo ? `<div class="pagenav" id="ev-pagenav"><button class="btn sm" id="pg-prev">‹</button><span id="pg-label">page ${pageNo}</span><button class="btn sm" id="pg-next">›</button><span class="sp"></span><span class="hint">highlighted: the cited passage</span></div><div class="pageview" id="ev-page"><div class="ld">Rendering page ${pageNo}…</div></div>` : ""}
+    <div class="pg">${linkify(esc(c.excerpt))}</div></div>`;
   const list = all || state.lastCitations; const idx = list.findIndex((x) => x.n === c.n);
   $("#ev-prev").disabled = idx <= 0; $("#ev-next").disabled = idx < 0 || idx >= list.length - 1;
   $("#ev-prev").onclick = () => showCitation(list[idx - 1], list); $("#ev-next").onclick = () => showCitation(list[idx + 1], list);
   $("#ev-open").onclick = guard(async () => { if (c.kind === "web") window.open(c.locator, "_blank"); else await api("/api/open", { method: "POST", body: { locator: c.locator } }); });
+  $("#ev-focus").onclick = () => { setFocus({ id: c.document_id, title: c.title, kind: c.kind, locator: c.locator }); toast(`Asking about ${c.title} only.`); $("#composer").focus(); };
+  if (pageNo) renderPdfPage(c, pageNo);
+}
+/** Fetch a rendered PDF page for the Evidence drawer and overlay the highlight boxes; ‹ › walk the document's pages (highlights only on the cited one). */
+async function renderPdfPage(c, n) {
+  const box = $("#ev-page"); if (!box) return;
+  const my = (renderPdfPage.seq = (renderPdfPage.seq || 0) + 1);
+  try {
+    const cited = n === Number((c.location.match(/^page (\d+)/) || [])[1]);
+    const r = await api(`/api/documents/${c.document_id}/page/${n}?` + (cited ? (c.chunk_id ? `chunk=${c.chunk_id}` : `text=${encodeURIComponent((c.excerpt || "").slice(0, 1500))}`) : ""));
+    if (my !== renderPdfPage.seq || !$("#ev-page")) return;
+    const pct = (v, of) => (100 * v / of).toFixed(2) + "%";
+    box.innerHTML = `<img src="${r.image}" alt="Page ${r.page} of ${esc(c.title)}" width="${r.width}" height="${r.height}">` + r.boxes.map((b) => `<div class="hl" style="left:${pct(b.x, r.width)};top:${pct(b.y, r.height)};width:${pct(b.w, r.width)};height:${pct(b.h, r.height)}"></div>`).join("");
+    $("#pg-label").textContent = `page ${r.page} of ${r.pages}`;
+    $("#pg-prev").disabled = r.page <= 1; $("#pg-next").disabled = r.page >= r.pages;
+    $("#pg-prev").onclick = () => { box.innerHTML = `<div class="ld">Rendering page ${r.page - 1}…</div>`; renderPdfPage(c, r.page - 1); };
+    $("#pg-next").onclick = () => { box.innerHTML = `<div class="ld">Rendering page ${r.page + 1}…</div>`; renderPdfPage(c, r.page + 1); };
+  } catch (e) { if (my === renderPdfPage.seq && $("#ev-page")) box.innerHTML = `<div class="ld">${esc(e.message)}</div>`; }
 }
 function renderAllSources(citations) {
   $("#src-count").textContent = citations && citations.length ? `(${citations.length})` : "";
@@ -371,6 +441,7 @@ function loadSessionIntoUi(s) {
   const t = $("#thread"); t.innerHTML = "";
   if (!s.messages.length) { t.innerHTML = `<div class="welcome" id="welcome"><h2>Ask about your sources</h2><p>Ask anything. When your sources (the bundles turned on in the Reading-from drawer) can answer, they are used and cited; anything from general knowledge is labelled. Tick <b>Sources only</b> to refuse everything else.</p><p class="hint" id="welcome-hint"></p></div>`; renderWelcome(); }
   $("#strict-mode").checked = s.mode === "sources-only" || (!s.mode && state.config.chat.mode === "sources-only");
+  setFocus(s.focus || null);
   for (const m of s.messages) { if (m.role === "user") appendUser(m.content); else { const el = appendAssistant(); finishAssistant(el, { text: m.content, citations: m.citations || [], ledger: m.ledger, basis: m.basis, notFound: false }); } }
   const last = [...s.messages].reverse().find((m) => m.role === "assistant" && m.citations && m.citations.length); state.lastCitations = last ? last.citations : []; renderAllSources(state.lastCitations);
   if (Array.isArray(s.bundles) && s.bundles.length) applyBundleNames(s.bundles);
@@ -385,7 +456,7 @@ async function autosave() { if (state.session && state.session.id) await saveSes
 /** Save the current conversation (creating it on first save) and refresh the session lists. */
 async function saveSession(quiet) {
   if (!state.session) state.session = newSessionObject();
-  const s = state.session; s.name = $("#session-name").value.trim() || s.name; s.persona = currentPersona(); s.bundles = state.bundles.filter((b) => b.enabled).map((b) => b.name); s.mode = $("#strict-mode").checked ? "sources-only" : "sources-first";
+  const s = state.session; s.name = $("#session-name").value.trim() || s.name; s.persona = currentPersona(); s.focus = state.focus; s.bundles = state.bundles.filter((b) => b.enabled).map((b) => b.name); s.mode = $("#strict-mode").checked ? "sources-only" : "sources-first";
   const p = state.config.models.providers[state.config.models.active]; s.provider = state.config.models.active; s.model = p.chat_model;
   const saved = s.id ? await api(`/api/sessions/${s.id}`, { method: "PUT", body: s }) : await api("/api/sessions", { method: "POST", body: s });
   state.session = saved; $("#session-saved").textContent = `saved ${fmtWhen(saved.updated_at)}`;
@@ -632,6 +703,7 @@ async function renderSettings() {
       <div class="row"><label>Skip files larger than (MB)</label><input class="fld" id="f-max" type="number" min="1" value="${f.max_file_mb}"></div>
       <div class="row"><label>Passage size (characters)</label><input class="fld" id="f-chunk" type="number" min="500" max="8000" value="${f.chunk_chars}"></div>
       <div class="row"><label>File types</label><input class="fld mono" id="f-ext" value="${esc(f.extensions.join(" "))}"></div>
+      <div class="row wide hint">Readable: txt md html pdf docx xlsx xls csv tsv json pptx rtf · emails eml msg · images png jpg jpeg webp bmp gif (read with OCR). Remove a type here to leave those files out.</div>
       <div class="row wide"><button class="btn pri" id="f-save">Save</button></div></div>`;
   } else if (state.sec === "websites") {
     const w = ix.websites; const srcs = state.bundles.flatMap((b) => b.sources.filter((s) => s.kind === "website").map((s) => ({ ...s, bundle: b.name })));
@@ -655,7 +727,11 @@ async function renderSettings() {
       <div class="row wide" style="display:flex;gap:8px"><button class="btn pri" id="g-save">Save</button><button class="btn" id="g-reload" title="If you edited config.json in a text editor">Reload config.json</button></div></div>
       <div class="card"><div class="ct">Storage</div>
       <p id="g-stats" class="hint">Loading…</p>
-      <div class="row wide" style="display:flex;gap:8px;align-items:center"><button class="btn" id="g-compact">Compact the database</button><span class="hint">Returns space freed by removed or re-indexed sources to disk. Takes a moment; wait for indexing to finish first.</span></div></div>`;
+      <div class="row wide" style="display:flex;gap:8px;align-items:center"><button class="btn" id="g-compact">Compact the database</button><span class="hint">Returns space freed by removed or re-indexed sources to disk. Takes a moment; wait for indexing to finish first.</span></div></div>
+      <div class="card"><div class="ct">Backups</div>
+      <p class="hint">A backup is small: your bundles and <i>where</i> their sources live (folder paths and website addresses — bookmarks, not copies), saved sessions, your personas, and settings without API keys. The files themselves and the index are never included; after restoring, put the folders back where they were and re-index.</p>
+      <div class="row wide" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn pri" id="g-backup">Back up now</button><label class="btn" for="g-restore-file" style="cursor:pointer">Restore from a backup…</label><input type="file" id="g-restore-file" accept=".zip" hidden><span class="hint">Backups are kept in <span class="mono">${esc(state.meta.data_dir)}/backups</span>; download one to keep it elsewhere.</span></div>
+      <div class="bklist" id="g-bklist"></div></div>`;
   } else {
     html += `<div class="card"><div class="ct">AI Data Depot ${esc(state.meta.version)}</div><p>A local reference assistant. It answers only from the folders and websites you enable, cites every claim, and says when the answer isn't in your sources.</p>
       <table class="tbl"><tr><td>Config</td><td style="font-family:var(--mono);font-size:12px">${esc(state.meta.config_path)}</td></tr><tr><td>Data</td><td style="font-family:var(--mono);font-size:12px">${esc(state.meta.data_dir)}</td></tr><tr><td>Vector search</td><td>${state.meta.sqlite_vec ? "sqlite-vec (native)" : "in-process fallback"}</td></tr></table></div>`;
@@ -664,8 +740,15 @@ async function renderSettings() {
   // wiring
   if ($("#g-stats")) {
     const fmtB = (n) => n > 1e9 ? (n / 1e9).toFixed(2) + " GB" : n > 1e6 ? (n / 1e6).toFixed(1) + " MB" : Math.round(n / 1e3) + " KB";
-    const showStats = async () => { const st = await api("/api/maintenance/stats"); $("#g-stats").textContent = `${st.documents.toLocaleString()} documents · ${st.chunks.toLocaleString()} passages · ${st.bundles} bundles · database ${fmtB(st.db_bytes)} · vectors: ${st.vec ? "sqlite-vec" : "in-process fallback"}`; };
+    const showStats = async () => { const st = await api("/api/maintenance/stats"); const im = state.meta.index_models; $("#g-stats").textContent = `${st.documents.toLocaleString()} documents · ${st.chunks.toLocaleString()} passages · ${st.bundles} bundles · database ${fmtB(st.db_bytes)} · vectors: ${st.vec ? "sqlite-vec" : "in-process fallback"}${im && im.models.length ? ` · built with ${im.models.map((m) => m.model).join(", ")}` : ""}`; };
     showStats().catch(() => { $("#g-stats").textContent = ""; });
+    const fmtB2 = fmtB;
+    const showBackups = async () => { const list = await api("/api/maintenance/backups"); const el = $("#g-bklist"); if (!el) return;
+      el.innerHTML = list.length ? list.map((b) => `<div class="bkrow"><span class="nm">${esc(b.name)}</span><span class="hint">${fmtB2(b.bytes)} · ${new Date(b.created_at).toLocaleString()}</span><span class="sp"></span><a class="btn sm" href="/api/maintenance/backups/${encodeURIComponent(b.name)}" download>Download</a><button class="btn sm" data-bkdel="${esc(b.name)}">Delete</button></div>`).join("") : `<div class="hint">No backups yet.</div>`;
+      $$("[data-bkdel]", el).forEach((x) => (x.onclick = guard(async () => { await api(`/api/maintenance/backups/${encodeURIComponent(x.dataset.bkdel)}`, { method: "DELETE" }); await showBackups(); }))); };
+    showBackups().catch(() => {});
+    $("#g-backup").onclick = guard(async () => { $("#g-backup").disabled = true; try { const r = await api("/api/maintenance/backups", { method: "POST" }); toast(`Backed up ${r.bundles} bundle${r.bundles === 1 ? "" : "s"} and ${r.sessions} session${r.sessions === 1 ? "" : "s"} (${fmtB2(r.bytes)}).`, 5000); await showBackups(); } finally { $("#g-backup").disabled = false; } });
+    $("#g-restore-file").onchange = guard(async () => { const f = $("#g-restore-file").files[0]; if (!f) return; const resp = await fetch("/api/maintenance/restore", { method: "POST", headers: { "content-type": "application/zip" }, body: f }); const j = await resp.json().catch(() => ({})); if (!resp.ok) throw new Error(j.error || "Restore failed."); toast(`Restored: ${j.bundles} new bundle(s), ${j.sources} source(s), ${j.sessions} session(s), ${j.personas} persona(s). Re-index to read the sources.`, 8000); $("#g-restore-file").value = ""; await refresh(); await renderSettings(); });
     $("#g-compact").onclick = guard(async () => { $("#g-compact").disabled = true; try { const r = await api("/api/maintenance/compact", { method: "POST" }); toast(`Compacted: ${fmtB(r.before)} → ${fmtB(r.after)}.`); await showStats(); } finally { $("#g-compact").disabled = false; } });
   }
   $$("[data-prov]", pane).forEach((b) => b.addEventListener("click", guard(async () => { await api("/api/settings", { method: "PUT", body: { models: { active: b.dataset.prov } } }); await renderSettings(); renderPrivacy(); })));
@@ -681,7 +764,7 @@ async function renderSettings() {
   });
   $("#m-pick-chat") && ($("#m-pick-chat").onclick = pickModel("#m-chat", "Chat model"));
   $("#m-pick-emb") && ($("#m-pick-emb").onclick = pickModel("#m-emb", "Embedding model"));
-  if ($("#m-status")) { api("/api/models/status").then((st) => { const el = $("#m-status"); if (!st.reachable) { el.className = "status bad"; el.textContent = `Not reachable — ${st.error}`; return; } const parts = [`Connected${st.models.length ? ` — ${st.models.length} models available` : ""}`]; if (st.chat_model_found === false) parts.push(`chat model “${st.chat_model}” not found`); if (st.embedding_model_found === false) parts.push(`embedding model “${st.embedding_model}” not found`); if (!st.embedding_model) parts.push("no embedding model set — indexing will use the fallback provider"); el.className = "status " + (parts.length > 1 ? "bad" : "ok"); el.textContent = parts.join(" · "); }).catch((e) => { $("#m-status").className = "status bad"; $("#m-status").textContent = e.message; }); }
+  if ($("#m-status")) { api("/api/models/status").then((st) => { const el = $("#m-status"); if (!el) return; /* user moved on */ if (!st.reachable) { el.className = "status bad"; el.textContent = `Not reachable — ${st.error}`; return; } const parts = [`Connected${st.models.length ? ` — ${st.models.length} models available` : ""}`]; if (st.chat_model_found === false) parts.push(`chat model “${st.chat_model}” not found`); if (st.embedding_model_found === false) parts.push(`embedding model “${st.embedding_model}” not found`); if (!st.embedding_model) parts.push("no embedding model set — indexing will use the fallback provider"); el.className = "status " + (parts.length > 1 ? "bad" : "ok"); el.textContent = parts.join(" · "); }).catch((e) => { const el = $("#m-status"); if (el) { el.className = "status bad"; el.textContent = e.message; } }); }
   $$("[data-theme]", pane).forEach((b) => b.addEventListener("click", guard(async () => { await api("/api/settings", { method: "PUT", body: { appearance: { theme: b.dataset.theme } } }); state.config.appearance.theme = b.dataset.theme; applyTheme(b.dataset.theme); await renderSettings(); })));
   if ($("#theme-editor")) {
     let editingId = null;
@@ -748,6 +831,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#new-persona-btn").addEventListener("click", () => editPersona({ id: null, name: "", description: "", prompt: "", builtin: false }, true));
   $$("#smenu button").forEach((b) => b.addEventListener("click", () => { state.sec = b.dataset.sec; $$("#smenu button").forEach((x) => x.classList.toggle("on", x === b)); renderSettings().catch((e) => toast(e.message)); }));
   try { await refresh(); } catch (e) { toast("Could not reach the server: " + e.message, 8000); return; }
+  $("#focus-btn").onclick = guard(async () => { if (state.focus) { setFocus(null); toast("Back to all enabled bundles."); return; } await pickDocument(); });
   state.session = newSessionObject(); renderPersonaSelect(); $("#persona-select").value = store.get("persona", "general");
   $("#strict-mode").checked = state.config.chat.mode === "sources-only";
   renderPrivacy(); wireIndexEvents();

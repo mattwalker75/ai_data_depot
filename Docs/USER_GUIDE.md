@@ -20,7 +20,10 @@ Sources → **+ New bundle** → name it ("Federal tax 2026", "Client · Henders
 description: it appears in the Reading-from drawer and helps you remember what is in it.
 
 - **+ Folder or file** opens a picker. Everything under a folder is included (supported types
-  only — see Settings → Indexing · Files).
+  only — see Settings → Indexing · Files). Text, Markdown, HTML, PDF (scanned pages via OCR),
+  Word, Excel, CSV, PowerPoint, JSON, RTF, **emails** (`.eml`, Outlook `.msg` — headers, body,
+  attachment names) and **images** (`.png`, `.jpg`, `.webp`, `.bmp`, `.gif` — read with OCR, so
+  receipts and scanned letters work).
 - **+ Website** asks for an address and a **scope**:
   - *Linked pages* (default) — the page and what it links to on the same site, N hops.
   - *This section* — everything whose address starts with the page's.
@@ -61,6 +64,17 @@ Type in Chat. The reply cites passages as `[1]`, `[2]`…; click one to see it. 
 
 The **Local / Cloud** badge says whether your question leaves the machine.
 
+**Ask about one document.** Click 📄 next to the composer and pick a document, or *Ask about
+this* in the Evidence drawer. A chip above the composer shows what you are asking about; only
+that document is searched until you click ✕. The choice is saved with the session.
+
+**Copy an answer.** Hover a reply and click *Copy*: the text goes to the clipboard with a
+numbered *Sources* list (title, page, file path or address) ready to paste into a memo.
+
+**See the page.** For a cited PDF the Evidence drawer shows the page itself with the cited
+passage highlighted; ‹ › walk through the document's pages. Other file types show the passage
+text.
+
 ## 4 · Personas
 
 A persona sets voice and focus (Tax Specialist, Researcher, Legal, Analyst, Tutor, Concise,
@@ -83,7 +97,24 @@ report) and **Import**.
   your own theme.
 - **Indexing · Files / Websites** — OCR, size limits, pages per site, schedule.
 - **General** — port, listen address, data folder (restart to apply), *Reload config.json* if you
-  edited it by hand, and **Compact the database** to reclaim space after removing sources.
+  edited it by hand, **Compact the database** to reclaim space after removing sources, and
+  **Backups**.
+
+## 7 · Backups
+
+**Back up now** writes a small zip to `data/backups/` (download it from the list to keep it
+elsewhere). It holds your bundles and *where* their sources live — folder paths and website
+addresses, bookmarks rather than copies — your saved sessions, your personas, and your settings
+**without API keys**. The files themselves and the index are never included; they can be
+gigabytes and the files already live in your folders. **Restore from a backup…** merges a zip
+into the current install (nothing is deleted or overwritten); then put the source folders back
+where they were, re-enter API keys, and re-index.
+
+## Changing the embedding model
+
+The index only works with the model that built it. If you switch embedding models in Settings,
+Chat and Sources show a yellow banner naming both models with a **Re-index everything** button;
+unchanged files are re-read automatically once you do.
 
 ## Tips
 

@@ -29,8 +29,9 @@ in which case nothing leaves the machine.
 Group folders and websites into **bundles** and tick the ones a question may use. **Index**
 them (files of every common type, scanned PDFs via OCR, websites within a scope you choose —
 never the open internet). **Ask**: answers cite passages `[1]`, `[2]`… you can click to read
-and open; *Sources first* mode converses normally and labels general knowledge, *Sources only*
-refuses anything unsupported. **Personas** set the voice (Tax Specialist, Legal, Researcher…);
+and open — for PDFs, the page itself with the passage highlighted; *Sources first* mode
+converses normally and labels general knowledge, *Sources only* refuses anything unsupported;
+📄 narrows a conversation to one document; *Copy* takes an answer with its sources to a memo. **Personas** set the voice (Tax Specialist, Legal, Researcher…);
 **Sessions** save a conversation per client or matter and export it.
 
 ## Documentation

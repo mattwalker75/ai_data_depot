@@ -28,6 +28,7 @@ browser ──HTTP/SSE──▶ server.js ──▶ src/chat.js ──▶ src/re
 | `src/retrieval.js` | Hybrid search: sqlite-vec nearest neighbours + FTS5 keyword hits, fused by reciprocal rank, restricted to the enabled bundles. |
 | `src/chat.js` | The grounded answer: persona + mode rules + numbered passages → model; citations parsed back out; the "How I answered" ledger; answer basis (sources / general / mixed / chat). |
 | `src/personas.js`, `src/sessions.js` | Built-in + user personas (`data/personas.json`); sessions as one JSON file each (`data/sessions/`). |
+| `src/backup.js` | Backup zips (bundle/source bookmarks, sessions, personas, config without keys — never files or the index) and the merge-only restore. |
 | `public/` | `index.html` (shell + dialogs), `style.css` (theme tokens, one block per preset), `app.js` (all UI logic). |
 
 ## Data model (SQLite)
@@ -43,6 +44,9 @@ jobs (indexing runs, pruned to the last 200)      meta (key/value: vec_dim, migr
 - `documents.locator` is the file path or URL; `content_hash` is SHA-1 of the extracted text, so an
   unchanged document is skipped without re-embedding. `documents.meta` holds a web page's ETag /
   Last-Modified and its same-site links (for conditional re-fetches).
+- `documents.embed_model` records which embedding model built the document's vectors
+  (`provider/model`); a document whose text is unchanged is still re-embedded when the current
+  model differs, and `indexer.indexModels()` reports the mismatch to the UI.
 - `chunks.embedding` (BLOB) is only populated when sqlite-vec is **not** available; otherwise the
   vector lives in `chunk_vec` only. `chunk_vec` has no foreign key, so `sweepOrphanVectors()` runs
   after jobs and deletions.
@@ -54,7 +58,8 @@ jobs (indexing runs, pruned to the last 200)      meta (key/value: vec_dim, migr
 1. UI POSTs `/api/chat` with the message, history, persona, enabled bundle ids and mode.
 2. `retrieval.search()` embeds the question (embedding provider), runs a vector KNN over `chunk_vec`
    and an FTS5 query over `chunks_fts`, fuses them (RRF), and loads the top `models.context_chunks`
-   passages with their document and bundle.
+   passages with their document and bundle. With `documentId` (ask about one document) both
+   searches are restricted to that document and the vector side ranks all of its chunks exactly.
 3. `chat.answer()` builds the system prompt: persona → mode rules (sources-first or sources-only)
    → numbered `SOURCES` block; appends trimmed history and the message; streams the model's reply
    as SSE `token` events.

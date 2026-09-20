@@ -22,7 +22,7 @@ Never restart the real instance while an index job runs (`GET /api/index/jobs`);
 server.js            routes + trust boundary + startup
 src/                 one module per concern (see Docs/ARCHITECTURE.md)
 public/              index.html · style.css · app.js  (vanilla, no build)
-test/                core.test.js (units) · server.test.js (boots the server on :8399)
+test/                core.test.js (units) · server.test.js (boots the server on :8399; the e2e test also runs a fake provider on :8398) · fixtures/
 Docs/                what you are reading
 DEPOT.sh · INSTALL_APP.sh · config.template.json · CHANGELOG.md · CLAUDE.md
 ```
@@ -41,7 +41,7 @@ DEPOT.sh · INSTALL_APP.sh · config.template.json · CHANGELOG.md · CLAUDE.md
 - **Config keys** get a default in `src/config.js → DEFAULTS`, a line in `config.template.json`,
   a row in `Docs/CONFIGURATION.md` and, if a user should see it, a field in Settings.
 - **Per-feature commits** with a `CHANGELOG.md` entry (Keep a Changelog). Matt pushes.
-- **Tests** live in `test/`; `server.test.js` needs port 8399 free.
+- **Tests** live in `test/`; `server.test.js` needs ports 8399 and 8398 free. Fixtures: `test/fixtures/` (a hand-built PDF, an `.eml`).
 
 ## Adding things
 

@@ -46,7 +46,7 @@ const DEFAULTS = {
   },
   indexing: {
     files: { watch: true, ocr: true, ocr_min_chars_per_page: 40, max_file_mb: 50, chunk_chars: 2800, chunk_overlap_chars: 300,
-             extensions: [".txt", ".md", ".markdown", ".html", ".htm", ".pdf", ".docx", ".xlsx", ".xls", ".csv", ".tsv", ".json", ".pptx", ".rtf"] },
+             extensions: [".txt", ".md", ".markdown", ".html", ".htm", ".pdf", ".docx", ".xlsx", ".xls", ".csv", ".tsv", ".json", ".pptx", ".rtf", ".eml", ".msg", ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"] },
     websites: { max_pages_per_site: 500, max_depth: 6, recheck_hours: 24, delay_ms: 1000, respect_robots: true, timeout_ms: 20000, user_agent: "AI-Data-Depot/0.1 (local reference assistant)" },
   },
   appearance: { theme: "harbor-light", _presets_note: "harbor-light, harbor-dark, reading-room, ledger, graphite, system, or the id of a custom theme below",

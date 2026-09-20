@@ -46,6 +46,10 @@ The user is not a developer — every message the UI shows must be a plain Engli
 9. **Commits**: one per feature with a dated `CHANGELOG.md` entry. **Never push** — the user
    pushes. Run `npm test` before committing; pipes (`| tail`) hide exit codes under `set -e`.
 10. Keep `README.md` high-level; details go in `Docs/`.
+11. **Embedding model changes** are tracked per document (`documents.embed_model`); the
+    unchanged-file shortcuts in `indexer.js` must keep comparing it or a model switch silently
+    leaves stale vectors. **Backups never include source files or the database** (Matt's rule —
+    they can be gigabytes); they are bookmarks + sessions + personas + config minus keys.
 
 ## Testing a change by hand
 Start a scratch instance on another port with its own `data_dir`, add a small folder, index

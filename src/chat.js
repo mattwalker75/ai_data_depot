@@ -55,7 +55,7 @@ function hrefFor(h) { return h.kind === "web" ? h.locator : `file://${encodeURI(
  * answer({message, history, personaId, bundleIds, onToken}) ->
  *   { text, citations:[{n,title,location,bundle,kind,locator,href,excerpt,document_id,chunk_id}], ledger:{...}, notFound }
  */
-async function answer({ message, history = [], personaId = "general", bundleIds = [], onToken, provider, model, mode }) {
+async function answer({ message, history = [], personaId = "general", bundleIds = [], onToken, provider, model, mode, documentId = null }) {
   const cfg = config.get();
   const db = open();
   const enabled = db.prepare("SELECT id, name FROM bundles WHERE enabled=1 ORDER BY position, id").all();
@@ -68,12 +68,16 @@ async function answer({ message, history = [], personaId = "general", bundleIds 
   const marker = cfg.chat.general_marker || "From general knowledge, not your sources:";
   const chatMode = mode === "sources-only" || mode === "sources-first" ? mode : (cfg.chat.mode === "sources-only" ? "sources-only" : "sources-first");
 
-  const hits = searched.length ? await search(message, { bundleIds: searched.map((b) => b.id), k: cfg.models.context_chunks || 12 }) : [];
-  const system = [persona.prompt, "", groundingRules(notFound, chatMode, marker), "", hits.length ? "SOURCES:\n\n" + sourcesBlock(hits) : (chatMode === "sources-only" ? "SOURCES: (none matched — there is nothing to answer from)" : "SOURCES: (none of the user's sources matched this message)")].join("\n");
+  // Focus: the user is asking about one document; only its passages are searched.
+  const focus = documentId ? db.prepare("SELECT id, title, locator, kind FROM documents WHERE id=? AND status='ok'").get(documentId) : null;
+  if (documentId && !focus) throw new Error("That document is no longer in the index. Pick another one or clear the focus.");
+  const hits = focus || searched.length ? await search(message, { bundleIds: searched.map((b) => b.id), k: cfg.models.context_chunks || 12, documentId: focus ? focus.id : null }) : [];
+  const focusLine = focus ? `The user is asking about ONE document: "${focus.title || focus.locator}". All SOURCES below are passages from it; answer about that document.` : "";
+  const system = [persona.prompt, "", groundingRules(notFound, chatMode, marker), focusLine, "", hits.length ? "SOURCES:\n\n" + sourcesBlock(hits) : (chatMode === "sources-only" ? "SOURCES: (none matched — there is nothing to answer from)" : "SOURCES: (none of the user's sources matched this message)")].join("\n");
   const messages = [{ role: "system", content: system }, ...trimHistory(history), { role: "user", content: message }];
 
   let text;
-  if (!searched.length && chatMode === "sources-only") {
+  if (!searched.length && !focus && chatMode === "sources-only") {
     text = `${notFound} — no source bundles are turned on. Enable a bundle in the Sources drawer and ask again.`;
     if (onToken) onToken(text);
   } else {
@@ -89,7 +93,7 @@ async function answer({ message, history = [], personaId = "general", bundleIds 
   const isNotFound = text.trim().startsWith(notFound);
   const usesGeneral = text.includes(marker);
   const basis = citations.length && usesGeneral ? "mixed" : citations.length ? "sources" : usesGeneral || isNotFound ? "general" : "chat";
-  const ledger = { searched: searched.map((b) => b.name), skipped: skipped.map((b) => b.name), documents: citedDocs.slice(0, 8), passages: hits.length, persona: persona.name, model: (providers.providerConfig(provider)).chat_model, provider: providers.providerConfig(provider).label, mode: chatMode, basis };
+  const ledger = { searched: focus ? [] : searched.map((b) => b.name), skipped: focus ? [] : skipped.map((b) => b.name), focus: focus ? (focus.title || focus.locator) : null, documents: citedDocs.slice(0, 8), passages: hits.length, persona: persona.name, model: (providers.providerConfig(provider)).chat_model, provider: providers.providerConfig(provider).label, mode: chatMode, basis };
   return { text, citations, ledger, notFound: isNotFound, basis, mode: chatMode };
 }
 

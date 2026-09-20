@@ -19,13 +19,16 @@ the only intended client, but everything is callable with `curl` from the same m
 | `PATCH /api/bundles/:id` | any of `name`, `enabled`, `description` |
 | `DELETE /api/bundles/:id` | removes its sources, documents, chunks and vectors |
 | `GET /api/bundles/:id/documents` | indexed documents with status and error |
-| `POST /api/sources` | `{ bundle_id, kind: "path" \| "website", locator, options?: { scope, depth }, index?: true }` — `index` must be exactly `true` to queue a job |
+| `POST /api/bundles/:id/sources` | `{ kind: "path" \| "website", location, options?: { scope, depth }, index?: true }` — `index` must be exactly `true` to queue a job |
 | `PATCH /api/sources/:id` | `{ options }` — a scope change forgets conditional-request data so the next index re-reads |
 | `POST /api/sources/:id/index` | queue an index job for this source |
 | `POST /api/sources/:id/retry-failed` | re-read only the documents that errored |
 | `GET /api/sources/:id/errors` | errors grouped by reason `{ groups: [{ reason, count, files }] }` |
 | `DELETE /api/sources/:id` | |
 | `GET /api/chunks/:id` | one passage (used by the Evidence drawer) |
+| `GET /api/documents?q=&bundle_ids=` | indexed documents of the enabled (or given) bundles — the "ask about one document" picker |
+| `GET /api/documents/:id` | one document's title, locator, kind, bundle |
+| `GET /api/documents/:id/page/:n?chunk=` | a PDF page rendered to PNG (`image` data URI, `width`, `height`, `pages`) plus `boxes` outlining the text of chunk `chunk` on that page; indexed PDF files only |
 
 ## Files
 
@@ -56,6 +59,11 @@ the only intended client, but everything is callable with `curl` from the same m
 | `POST /api/settings/reload` | re-read `config.json` from disk (after editing it by hand) |
 | `GET /api/maintenance/stats` | `{ db_bytes, documents, chunks, bundles, vec }` |
 | `POST /api/maintenance/compact` | housekeeping + `VACUUM` → `{ before, after }` bytes; refused while a job runs |
+| `GET /api/maintenance/backups` | list of backup zips in `data/backups/` |
+| `POST /api/maintenance/backups` | create one → `{ name, path, bytes, bundles, sessions }` — bookmarks to sources, sessions, personas, config without keys; never files or the index |
+| `GET /api/maintenance/backups/:name` | download; `DELETE` removes |
+| `POST /api/maintenance/restore` | body = the zip (raw); merges without deleting → `{ bundles, sources, sessions, personas }` counts of what was added |
+| `GET /api/state` → `index_models` | `{ current, models: [{ model, documents }], mismatch }` — which embedding models built the index |
 
 ## Personas & sessions
 
@@ -68,6 +76,8 @@ the only intended client, but everything is callable with `curl` from the same m
 
 ## Chat
 
-`POST /api/chat` — `{ message, history, persona, bundle_ids, mode }` → **SSE**:
+`POST /api/chat` — `{ message, history, persona, bundle_ids, mode, document_id? }` → **SSE**
+(`document_id` restricts retrieval to that one document and tells the model so; the ledger
+carries `focus`):
 `token { text }` repeated, then `done { text, citations, ledger, basis, mode }`, or `error { message }`.
 The connection closing on the client side aborts the model request.

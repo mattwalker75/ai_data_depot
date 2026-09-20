@@ -147,3 +147,15 @@ a{color:var(--acc-text)}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--nav);color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;z-index:50;box-shadow:var(--shadow);max-width:90vw}
 @media (max-width:900px){ .app{--lw:0px;--rw:0px} .handle{display:none} .settings{grid-template-columns:1fr} .smenu{flex-direction:row;flex-wrap:wrap;border-right:none;border-bottom:1px solid var(--line)} .page.two{grid-template-columns:1fr} .row{grid-template-columns:1fr} }
 @media (prefers-reduced-motion:reduce){ *{transition:none!important;animation:none!important} }
+
+/* ask about one document */
+.focus{margin:0 22px 8px;display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--mute)} .focus b{color:var(--ink);font-weight:600;max-width:60ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap} .focus .x{border:none;background:transparent;cursor:pointer;color:var(--mute);font-size:14px;padding:0 4px} .focus .x:hover{color:var(--ink)}
+.compose .btn.icon{padding:6px 8px;font-size:15px;line-height:1} .compose .btn.icon.on{background:var(--acc-soft);border-color:var(--acc)}
+/* copy an answer */
+.ai .who .copybtn{margin-left:auto;border:1px solid var(--line);background:transparent;color:var(--mute);border-radius:6px;font-size:11px;padding:1px 7px;cursor:pointer;opacity:0;transition:opacity .15s} .ai:hover .who .copybtn,.ai .who .copybtn:focus{opacity:1} .ai .who .copybtn:hover{color:var(--ink);border-color:var(--acc)}
+/* rendered PDF page in the Evidence drawer */
+.pageview{position:relative;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff;margin:0 0 10px} .pageview img{display:block;width:100%;height:auto} .pageview .hl{position:absolute;background:var(--mark);opacity:.45;border-radius:2px;pointer-events:none;mix-blend-mode:multiply} .pageview .ld{padding:24px;text-align:center;color:var(--mute);font-size:12.5px}
+.pagenav{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mute);margin:0 0 8px} .pagenav .sp{flex:1}
+.evtoggle{font-size:11.5px;color:var(--mute);margin:6px 0} .evtoggle button{border:none;background:transparent;color:var(--acc);cursor:pointer;font-size:11.5px;padding:0}
+/* backups */
+.bklist{display:flex;flex-direction:column;gap:4px;margin:8px 0} .bkrow{display:flex;align-items:center;gap:10px;font-size:12.5px;padding:6px 8px;border:1px solid var(--line);border-radius:8px} .bkrow .nm{font-family:var(--mono);font-size:12px} .bkrow .sp{flex:1}
