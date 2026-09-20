@@ -73,7 +73,7 @@ async function listModels(name) {
 /** Ping: can we reach it, and which of the configured models exist? */
 async function status(name) {
   const p = providerConfig(name);
-  const out = { provider: p.key, label: p.label, base_url: p.base_url, local: !!p.local, reachable: false, models: [], chat_model: p.chat_model, embedding_model: p.embedding_model, chat_model_found: null, embedding_model_found: null, error: null };
+  const out = { provider: p.key, label: p.label, base_url: p.base_url, local: !!p.local, reachable: false, models: [], chat_model: p.chat_model, embedding_model: p.embedding_model, chat_model_found: null, embedding_model_found: null, error: null, token_param: tokenParamFor(p, p.chat_model) };
   try {
     out.models = await listModels(p.key);
     out.reachable = true;
@@ -89,12 +89,28 @@ async function status(name) {
  * Chat completion, streamed. Calls onToken(text) as text arrives and resolves
  * with the full text. `messages` are OpenAI-shaped.
  */
+// The answer-length parameter is `max_tokens` everywhere except OpenAI's
+// newer models (o-series, gpt-5…), which reject it with a 400 naming
+// `max_completion_tokens`. The first such error switches that provider/model
+// to the new name for the rest of this run; nothing to configure.
+const tokenParam = new Map();
+function tokenParamFor(p, model) { return tokenParam.get(`${p.key}/${model}`) || "max_tokens"; }
+
 async function chat(messages, { onToken, temperature, max_tokens, model, provider } = {}) {
   const p = providerConfig(provider);
   const cfg = config.get().models;
-  const body = { model: model || p.chat_model, messages, stream: true, temperature: temperature ?? cfg.temperature };
-  if (max_tokens || cfg.max_tokens) body.max_tokens = max_tokens || cfg.max_tokens;
-  const { resp, done } = await request(p, "/chat/completions", body, { stream: true });
+  const useModel = model || p.chat_model;
+  const limit = max_tokens || cfg.max_tokens;
+  const build = () => { const body = { model: useModel, messages, stream: true, temperature: temperature ?? cfg.temperature }; if (limit) body[tokenParamFor(p, useModel)] = limit; return body; };
+  let started;
+  try { started = await request(p, "/chat/completions", build(), { stream: true }); }
+  catch (e) {
+    if (!(/\b400\b/.test(e.message) && /max_completion_tokens/.test(e.message) && tokenParamFor(p, useModel) === "max_tokens")) throw e;
+    tokenParam.set(`${p.key}/${useModel}`, "max_completion_tokens");
+    console.warn(`[models] ${p.label} ${useModel} wants max_completion_tokens — switched for this run`);
+    started = await request(p, "/chat/completions", build(), { stream: true });
+  }
+  const { resp, done } = started;
   const reader = resp.body.getReader();
   const dec = new TextDecoder();
   let buf = "", full = "";
@@ -158,4 +174,4 @@ async function embed(texts, { provider } = {}) {
   return out;
 }
 
-module.exports = { providerConfig, embeddingProvider, listModels, status, chat, embed };
+module.exports = { tokenParamFor, providerConfig, embeddingProvider, listModels, status, chat, embed };

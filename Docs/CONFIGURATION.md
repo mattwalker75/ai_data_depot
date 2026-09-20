@@ -26,7 +26,7 @@ app). The folder is gitignored.
 | --- | --- |
 | `active` | Which provider answers chat and (by default) builds the index. |
 | `providers.<name>` | `label`, `base_url`, `api_key`, `chat_model`, `embedding_model`, `local` (true = nothing leaves the machine; shown as the privacy badge). Any OpenAI-compatible endpoint works — add a new entry under `custom` or a new name. |
-| `temperature`, `max_tokens` | Passed to the chat model. |
+| `temperature`, `max_tokens` | Passed to the chat model. `max_tokens` is sent under that name; a model that answers 400 asking for `max_completion_tokens` gets a retry with the new name, remembered for that provider/model until restart. |
 | `context_chunks` | Passages handed to the model per answer (12). Lower it for small local context windows. |
 | `request_timeout_ms` | Per request. |
 

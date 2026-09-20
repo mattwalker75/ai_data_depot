@@ -145,3 +145,26 @@ test("extract: an .eml becomes headers + body; a PDF page renders with highlight
   assert.equal(none.boxes.length, 0, "no excerpt, no highlights");
   await extract.shutdown();
 });
+
+test("chat: a 400 asking for max_completion_tokens is retried once with that name, then remembered", async () => {
+  const providers = require("../src/providers");
+  config.update({ models: { active: "custom", max_tokens: 1234, providers: { custom: { label: "Fake", base_url: "http://fake.test/v1", api_key: "k", chat_model: "gpt-new", embedding_model: "e" } } } });
+  const bodies = [];
+  const realFetch = global.fetch;
+  global.fetch = async (url, opts) => {
+    const body = JSON.parse(opts.body); bodies.push(body);
+    if ("max_tokens" in body) return new Response(JSON.stringify({ error: { message: "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead." } }), { status: 400, headers: { "content-type": "application/json" } });
+    return new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: "ok" } }] })}\n\ndata: [DONE]\n\n`, { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+  try {
+    assert.equal(await providers.chat([{ role: "user", content: "hi" }]), "ok");
+    assert.equal(bodies.length, 2, "one refusal, one retry");
+    assert.equal(bodies[0].max_tokens, 1234); assert.equal(bodies[1].max_completion_tokens, 1234); assert.ok(!("max_tokens" in bodies[1]));
+    assert.equal(await providers.chat([{ role: "user", content: "again" }]), "ok");
+    assert.equal(bodies.length, 3, "remembered: no refusal the second time"); assert.equal(bodies[2].max_completion_tokens, 1234);
+    assert.equal(providers.tokenParamFor(providers.providerConfig("custom"), "gpt-new"), "max_completion_tokens");
+    assert.equal(providers.tokenParamFor(providers.providerConfig("custom"), "other-model"), "max_tokens", "per model, not per provider");
+    global.fetch = async () => new Response(JSON.stringify({ error: { message: "Unsupported parameter: 'max_tokens'. Use 'max_completion_tokens' instead." } }), { status: 400, headers: { "content-type": "application/json" } });
+    await assert.rejects(providers.chat([{ role: "user", content: "x" }], { model: "stubborn" }), /max_completion_tokens/, "a second refusal surfaces the error");
+  } finally { global.fetch = realFetch; }
+});

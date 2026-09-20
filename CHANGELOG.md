@@ -4,6 +4,13 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 
 ## [Unreleased]
 
+### Fixed
+- 2026-09-20: **"Unsupported parameter: 'max_tokens'… Use 'max_completion_tokens'".**
+  Newer OpenAI models reject `max_tokens`. The first reply refused this way
+  is retried with `max_completion_tokens` (same value), and that name is used
+  for that provider/model for the rest of the run. Settings → Models says
+  so under Max answer length, and reports when the switch has happened.
+
 ### Added
 - 2026-09-20: **Ask about one document.** 📄 next to the composer picks a
   document from the enabled bundles (or *Ask about this* in the Evidence
