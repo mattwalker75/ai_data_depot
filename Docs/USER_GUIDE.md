@@ -12,7 +12,7 @@ terminal, or make it a double-clickable `.app` for your Desktop or Applications 
 [my_mac_app](https://github.com/mattwalker75/my_mac_app):
 
 ```sh
-mk_mac_app.py --name "AI Data Depot" --script ~/Desktop/REPOs/ai_data_depot/Start_Ai_Data_Depot.sh --emoji 🗄️
+mk_mac_app.py --name "AI Data Depot" --script ~/Desktop/REPOs/ai_data_depot/Start_Ai_Data_Depot.sh --icon ~/Desktop/REPOs/ai_data_depot/icon/ai_data_depot.icns
 ```
 
 If the app is already running (started with `./DEPOT.sh`), the launcher just opens a window

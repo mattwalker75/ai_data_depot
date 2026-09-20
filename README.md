@@ -27,7 +27,8 @@ in which case nothing leaves the machine.
 **As a desktop app:** `Start_Ai_Data_Depot.sh` starts the server and opens it in its own
 window; closing the window stops it. Turn it into a double-clickable `.app` with
 [my_mac_app](https://github.com/mattwalker75/my_mac_app):
-`mk_mac_app.py --name "AI Data Depot" --script /path/to/ai_data_depot/Start_Ai_Data_Depot.sh --emoji 🗄️`.
+`mk_mac_app.py --name "AI Data Depot" --script /path/to/ai_data_depot/Start_Ai_Data_Depot.sh --icon /path/to/ai_data_depot/icon/ai_data_depot.icns`
+(the icon is in `icon/`, as `.icns` and `.png`).
 
 ## In one paragraph
 

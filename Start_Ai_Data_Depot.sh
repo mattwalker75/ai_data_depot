@@ -7,7 +7,7 @@
 #   cd ~/Desktop/REPOs/my_mac_app
 #   ./mk_mac_app.py --name "AI Data Depot" \
 #                   --script ~/Desktop/REPOs/ai_data_depot/Start_Ai_Data_Depot.sh \
-#                   --icon example_icons/books.png        # or --emoji 🗄️
+#                   --icon ~/Desktop/REPOs/ai_data_depot/icon/ai_data_depot.icns
 #
 # Behaviour:
 #   • Starts the AI Data Depot server (in the foreground, output in LOG) and

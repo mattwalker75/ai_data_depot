@@ -4,6 +4,11 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 
 ## [Unreleased]
 
+### Added
+- 2026-09-20: App icon — `icon/ai_data_depot.icns` and `.png` (a fanned stack
+  of pages with a `[1]` citation badge) for the desktop app built with
+  my_mac_app.
+
 ### Fixed
 - 2026-09-20: **Folder picker looked broken in dark themes**: the Size column
   rendered as little badges (its cells shared a class with the citation
