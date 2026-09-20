@@ -30,7 +30,8 @@ browser ──HTTP/SSE──▶ server.js ──▶ src/chat.js ──▶ src/re
 | `src/personas.js`, `src/sessions.js` | Built-in + user personas (`data/personas.json`); sessions as one JSON file each (`data/sessions/`). |
 | `src/documents.js` | Generated documents: types (what the model is told, shape, allowed formats), the request block the chat model hands over, intent detection, prose and two-pass tabular generation, the `outputs` table, OUTPUT/ files and retention. |
 | `src/docmodel.js` | Markdown → typed blocks; client/cited variants; HTML and Markdown output of blocks. |
-| `src/render.js` | Blocks/sheets → bytes: pdfkit, docx, SheetJS, text. |
+| `src/render.js` | Blocks/sheets → bytes: pdfkit, docx, SheetJS, text (diagram blocks as embedded PNGs). |
+| `src/diagrams.js` | Mermaid → PNG through the user's installed Chromium browser, headless, over the DevTools protocol (`public/diagram.html` is the render page). |
 | `src/backup.js` | Backup zips (bundle/source bookmarks, sessions, personas, config without keys — never files or the index) and the merge-only restore. |
 | `public/` | `index.html` (shell + dialogs), `style.css` (theme tokens, one block per preset), `app.js` (all UI logic). |
 

@@ -105,6 +105,10 @@ right drawer is the list of this session's files (or all); click a row to open t
 
 Kinds: memo/letter, summary/briefing, checklist, table/data extract (Excel by default; built
 document by document so nothing is skipped), comparison, and free-form for anything else.
+Memos, summaries and free-form documents can carry a small **diagram** — a flowchart, timeline,
+sequence or chart — when it helps or when you ask ("…with a flowchart of the steps"); it is
+drawn into PDF and Word files using your installed Chrome/Edge/Brave/Arc, and shown live in
+the preview. Switch off in Settings → General if you never want them.
 Formats: PDF, Word, Excel (tables and checklists), text. The 🗎 button next to the composer is the
 same thing as a form; **File** under any reply saves that reply as-is.
 

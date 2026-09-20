@@ -73,3 +73,48 @@ test("documents: fromText writes files into OUTPUT, lists them, cleanup only rem
   fs.writeFileSync(path.join(documents.outputDir(), "mine.txt"), "keep me");
   db.prepare("UPDATE outputs SET keep=0").run(); documents.cleanup(); assert.ok(fs.existsSync(path.join(documents.outputDir(), "mine.txt")));
 });
+
+test("render: a diagram block with an image is embedded in PDF and Word; without one the source is printed with a note", async () => {
+  const { createCanvas } = require("@napi-rs/canvas");
+  const c = createCanvas(200, 100); const ctx = c.getContext("2d"); ctx.fillStyle = "#0f6a63"; ctx.fillRect(0, 0, 200, 100);
+  const png = c.toBuffer("image/png").toString("base64");
+  const withImg = { title: "Flow", blocks: [{ kind: "p", text: "The process:" }, { kind: "diagram", lang: "mermaid", text: "flowchart LR\nA-->B", image: png, width: 200, height: 100, caption: "Steps" }] };
+  const pdf = await render.render("pdf", withImg); assert.match(pdf.toString("latin1"), /\/Subtype \/Image/, "PDF carries an image");
+  const docx = await render.render("docx", withImg); const JSZip = require("jszip"); const z = await JSZip.loadAsync(docx);
+  assert.ok(Object.keys(z.files).some((f) => /^word\/media\/.*\.png$/.test(f)), "Word carries the PNG in word/media");
+  const noImg = { title: "Flow", blocks: [{ kind: "diagram", lang: "mermaid", text: "flowchart LR\nA-->B", note: "Diagram not drawn:" }] };
+  const pdf2 = await render.render("pdf", noImg); assert.doesNotMatch(pdf2.toString("latin1"), /\/Subtype \/Image/);
+  const txt = (await render.render("text", noImg)).toString(); assert.match(txt, /```mermaid\nflowchart LR/);
+  assert.match(dm.blocksToHtml(withImg.blocks), /<figure class="diagram"><img src="data:image\/png;base64,/);
+  assert.match(dm.blocksToHtml(noImg.blocks), /<pre class="mermaid">/);
+});
+
+test("diagrams: headless browser renders Mermaid to PNG and reports bad syntax (skipped without a Chromium browser)", { skip: !require("../src/diagrams").available() }, async () => {
+  // Needs the app's /diagram.html: boot the real server on a scratch port.
+  const { spawn } = require("node:child_process");
+  const PORT = 8397; const dir = fs.mkdtempSync(path.join(os.tmpdir(), "depot-diag-"));
+  fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({ server: { port: PORT, host: "127.0.0.1", open_browser: false }, data_dir: path.join(dir, "data") }));
+  const proc = spawn(process.execPath, ["server.js"], { cwd: path.join(__dirname, ".."), env: { ...process.env, DEPOT_CONFIG: path.join(dir, "config.json"), DEPOT_NO_OPEN: "1" }, stdio: "ignore" });
+  try {
+    const t0 = Date.now(); let up = false;
+    while (Date.now() - t0 < 20000 && !up) { try { up = (await fetch(`http://127.0.0.1:${PORT}/api/health`)).ok; } catch {} if (!up) await new Promise((r) => setTimeout(r, 200)); }
+    assert.ok(up, "scratch server up");
+    const { renderBlocks } = require("../src/diagrams");
+    const blocks = [{ kind: "diagram", text: "flowchart LR\n  A[Gather documents] --> B{Complete?}\n  B -- yes --> C[File the return]\n  B -- no --> A" }, { kind: "diagram", text: "flowchart LR\n  A[Broken --> " }];
+    const r = await renderBlocks(blocks, `http://127.0.0.1:${PORT}`);
+    assert.equal(r.rendered, 1, JSON.stringify(r)); assert.equal(r.failed.length, 1); assert.equal(r.failed[0].index, 1);
+    assert.ok(blocks[0].image && Buffer.from(blocks[0].image, "base64").length > 2000, "a real PNG came back"); assert.ok(blocks[0].width > 200 && blocks[0].height > 60, `size ${blocks[0].width}x${blocks[0].height}`);
+    assert.ok(!blocks[1].image); assert.match(r.failed[0].error, /Parse error|Syntax|Expecting/i);
+  } finally { proc.kill(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("diagrams: fenced code survives the client copy untouched and images attach to both copies", () => {
+  const md = "Intro [1].\n\n```mermaid\nflowchart LR\n  A[Step 1] --> B[Step 2]\n```\n\nAfter [1].";
+  assert.match(dm.stripCitations(md), /A\[Step 1\] --> B\[Step 2\]/, "a [1]-looking label inside Mermaid is not a citation");
+  const v = dm.variants({ title: "T", markdown: md, citations: [{ n: 1, title: "s", locator: "/s" }] });
+  const client = v.client.blocks.find((b) => b.kind === "diagram"), cited = v.cited.blocks.find((b) => b.kind === "diagram");
+  assert.equal(client.text, cited.text);
+  documents._diagramImages.clear(); documents._diagramImages.set("flowchart LR A[Step 1] --> B[Step 2]", { image: "AAAA", width: 10, height: 5 });
+  documents.attachDiagramImages(v);
+  assert.equal(client.image, "AAAA", "client copy got the image"); assert.equal(cited.image, "AAAA", "cited copy got the image");
+});

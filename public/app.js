@@ -598,9 +598,18 @@ function renderFilePreview(o, variant, box) {
     ${!f || !f.exists ? `<div class="empty">This file has expired (files are kept ${state.keepDays || ""} days unless marked Keep).</div>` : o.format === "pdf" ? `<iframe class="fframe" src="/output/${encodeURIComponent(f.name)}" title="${esc(o.title)}"></iframe>` : `<div class="fhtml" id="fhtml">Loading preview…</div>`}
     <div class="fmeta"><span>${basisLabel(o.basis)}</span><span>·</span><label class="chk"><input type="checkbox" id="file-keep" ${o.keep ? "checked" : ""}> Keep (never expires)</label><span class="sp" style="flex:1"></span><button type="button" class="btn sm" id="file-del">Delete</button></div>`;
   $$("[data-v]", box).forEach((b) => (b.onclick = () => renderFilePreview(o, b.dataset.v, box)));
-  if (f && f.exists && o.format !== "pdf") fetch(`/api/outputs/${o.id}/preview?variant=${variant}`).then((r) => r.text()).then((h) => { const el = $("#fhtml", box); if (el) el.innerHTML = h; }).catch(() => {});
+  if (f && f.exists && o.format !== "pdf") fetch(`/api/outputs/${o.id}/preview?variant=${variant}`).then((r) => r.text()).then((h) => { const el = $("#fhtml", box); if (el) { el.innerHTML = h; drawMermaid(el); } }).catch(() => {});
   $("#file-keep", box).onchange = guard(async () => { const keep = $("#file-keep", box).checked; const u = await api(`/api/outputs/${o.id}`, { method: "PATCH", body: { keep } }); o.keep = u.keep; toast(keep ? "Kept — this file will not expire." : "This file expires like the others."); if (!$("#files-pane").hidden) renderFilesPane().catch(() => {}); });
   $("#file-del", box).onclick = guard(async () => { if (!confirm(`Delete “${o.title}”? This removes the file${o.files.length > 1 ? "s" : ""} from OUTPUT/.`)) return; await api(`/api/outputs/${o.id}`, { method: "DELETE" }); toast("Deleted."); state.fileSel = null; const dlg = $("#preview-dialog"); if (dlg.open) dlg.close(); if (!$("#files-pane").hidden) renderFilesPane().catch(() => {}); $$(`.filecard[data-output="${o.id}"]`).forEach((c) => c.remove()); });
+}
+/** Draw any ```mermaid blocks in a preview live (files that could not embed an image still show the diagram here). */
+async function drawMermaid(root) {
+  const nodes = $$("pre.mermaid", root); if (!nodes.length) return;
+  try {
+    if (!drawMermaid.lib) drawMermaid.lib = import("/vendor/mermaid/mermaid.esm.min.mjs").then((m) => { const lib = m.default || m; lib.initialize({ startOnLoad: false, theme: "neutral", securityLevel: "strict" }); return lib; });
+    const lib = await drawMermaid.lib;
+    await lib.run({ nodes });
+  } catch (e) { nodes.forEach((n) => { n.insertAdjacentHTML("beforebegin", `<div class="hint">Diagram could not be drawn: ${esc(e.message)}</div>`); }); }
 }
 function basisLabel(b) { return b === "sources" ? "From your sources" : b === "mixed" ? "Sources + general knowledge" : b === "general" ? "General knowledge — not from your sources" : ""; }
 
@@ -908,6 +917,7 @@ async function renderSettings() {
       <div class="card"><div class="ct">Generated files</div>
       <div class="row"><label>Open a preview when a file is created</label><span class="chk"><input type="checkbox" id="g-autoprev" ${(state.config.output || {}).auto_preview !== false ? "checked" : ""}></span></div>
       <div class="row"><label>Keep files for (days)</label><input class="fld" id="g-keep" type="number" min="1" max="3650" value="${(state.config.output || {}).keep_days ?? 30}"></div>
+      <div class="row"><label>Diagrams in documents</label><span class="chk"><input type="checkbox" id="g-diagrams" ${(state.config.output || {}).diagrams !== false ? "checked" : ""}> <span class="hint" id="g-diag-status">…</span></span></div>
       <div class="row wide hint">Files not marked Keep are removed at startup once older than this. The Preview button on a file card always works, whatever the first setting.</div>
       <div class="row wide" style="display:flex;gap:8px"><button class="btn pri" id="g-files-save">Save</button></div></div>
       <div class="card"><div class="ct">Backups</div>
@@ -973,7 +983,8 @@ async function renderSettings() {
   }
   $("#f-save") && ($("#f-save").onclick = guard(async () => { await api("/api/settings", { method: "PUT", body: { indexing: { files: { watch: $("#f-watch").checked, ocr: $("#f-ocr").checked, ocr_min_chars_per_page: Number($("#f-ocrmin").value), max_file_mb: Number($("#f-max").value), chunk_chars: Number($("#f-chunk").value), extensions: $("#f-ext").value.split(/[\s,]+/).filter(Boolean).map((e) => (e.startsWith(".") ? e : "." + e).toLowerCase()) } } } }); toast("Saved."); await renderSettings(); }));
   $("#w-save") && ($("#w-save").onclick = guard(async () => { await api("/api/settings", { method: "PUT", body: { indexing: { websites: { max_pages_per_site: Number($("#w-cap").value), max_depth: Number($("#w-depth").value), recheck_hours: Number($("#w-hours").value), delay_ms: Number($("#w-delay").value), respect_robots: $("#w-robots").checked } } } }); toast("Saved."); await renderSettings(); }));
-  $("#g-files-save") && ($("#g-files-save").onclick = guard(async () => { await api("/api/settings", { method: "PUT", body: { output: { auto_preview: $("#g-autoprev").checked, keep_days: Math.max(1, Number($("#g-keep").value) || 30) } } }); toast("Saved."); await refresh(); await renderSettings(); }));
+  $("#g-files-save") && ($("#g-files-save").onclick = guard(async () => { await api("/api/settings", { method: "PUT", body: { output: { auto_preview: $("#g-autoprev").checked, diagrams: $("#g-diagrams").checked, keep_days: Math.max(1, Number($("#g-keep").value) || 30) } } }); toast("Saved."); await refresh(); await renderSettings(); }));
+  if ($("#g-diag-status")) api("/api/outputs").then((r) => { const d = r.diagrams || {}; $("#g-diag-status").textContent = d.available ? `drawn with ${(d.browser || "").split("/").filter(Boolean).pop().replace(/\.app$/, "").replace("Google Chrome", "Chrome")}` : "no Chromium browser found — diagrams appear in previews only, not inside PDF/Word files"; }).catch(() => {});
   $("#g-save") && ($("#g-save").onclick = guard(async () => { const r = await api("/api/settings", { method: "PUT", body: { server: { port: Number($("#g-port").value), host: $("#g-host").value, open_browser: $("#g-open").checked }, data_dir: $("#g-data").value.trim() } }); toast(r.changed_now.length ? "Saved — restart to apply " + r.changed_now.join(", ") : "Saved."); await renderSettings(); }));
   $("#g-reload") && ($("#g-reload").onclick = guard(async () => { await api("/api/settings/reload", { method: "POST" }); await refresh(); await renderSettings(); toast("config.json reloaded."); }));
   $("#ix-files") && ($("#ix-files").onclick = guard(async () => { if (!(await ensureModelReady())) return; await api("/api/index/files", { method: "POST", body: {} }); toast("Re-indexing files."); }));

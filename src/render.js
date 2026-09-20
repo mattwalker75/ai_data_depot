@@ -71,7 +71,20 @@ function renderPdf({ title, blocks, footer }) {
           b.rows.forEach((r) => drawRow(r, false, null));
           doc.moveDown(0.8); body(); break;
         }
-        case "code": case "diagram": doc.font("Courier").fontSize(9).fillColor("#1f2a2e").text(b.text, { width: W }); doc.moveDown(0.6); body(); break;
+        case "diagram": {
+          if (b.image) {
+            const img = Buffer.from(b.image, "base64"); const maxW = W, maxH = 420;
+            const ratio = b.width && b.height ? b.height / b.width : 0.6;
+            let w = Math.min(maxW, (b.width || 2 * maxW) / 2); let h = w * ratio; if (h > maxH) { h = maxH; w = h / ratio; }
+            if (doc.y + h > bottom()) doc.addPage();
+            doc.image(img, doc.page.margins.left + (W - w) / 2, doc.y, { width: w }); doc.y += h + 6; doc.x = doc.page.margins.left;
+            if (b.caption) { doc.font("Helvetica-Oblique").fontSize(9).fillColor("#66707a").text(b.caption, { width: W, align: "center" }); }
+            doc.moveDown(0.6); body(); break;
+          }
+          doc.font("Helvetica-Oblique").fontSize(9.5).fillColor("#66707a").text(b.note || "Diagram (Mermaid source; could not be drawn as an image):", { width: W }); doc.moveDown(0.2);
+          doc.font("Courier").fontSize(8.5).fillColor("#1f2a2e").text(b.text, { width: W }); doc.moveDown(0.6); body(); break;
+        }
+        case "code": doc.font("Courier").fontSize(9).fillColor("#1f2a2e").text(b.text, { width: W }); doc.moveDown(0.6); body(); break;
         case "rule": doc.moveDown(0.3); doc.moveTo(doc.page.margins.left, doc.y).lineTo(doc.page.margins.left + W, doc.y).lineWidth(0.5).strokeColor("#ddd7c9").stroke(); doc.moveDown(0.6); break;
       }
     }
@@ -106,7 +119,18 @@ async function renderDocx({ title, blocks }) {
         const rows = [new d.TableRow({ tableHeader: true, children: b.columns.map((c) => cell(c, true)) }), ...b.rows.map((r) => new d.TableRow({ children: r.map((c) => cell(c, false)) }))];
         children.push(new d.Table({ rows, width: { size: 100, type: d.WidthType.PERCENTAGE } })); children.push(new d.Paragraph({ text: "" })); break;
       }
-      case "code": case "diagram": b.text.split("\n").forEach((l) => children.push(new d.Paragraph({ children: [new d.TextRun({ text: l, font: "Courier New", size: 18 })] }))); break;
+      case "diagram": {
+        if (b.image) {
+          const maxW = 600; const ratio = b.width && b.height ? b.height / b.width : 0.6;
+          let w = Math.min(maxW, (b.width || 2 * maxW) / 2); let h = Math.round(w * ratio); if (h > 560) { h = 560; w = Math.round(h / ratio); }
+          children.push(new d.Paragraph({ alignment: d.AlignmentType.CENTER, children: [new d.ImageRun({ type: "png", data: Buffer.from(b.image, "base64"), transformation: { width: Math.round(w), height: h } })], spacing: { after: 120 } }));
+          if (b.caption) children.push(new d.Paragraph({ alignment: d.AlignmentType.CENTER, children: [new d.TextRun({ text: b.caption, italics: true, size: 18, color: "66707A" })] }));
+          break;
+        }
+        children.push(new d.Paragraph({ children: [new d.TextRun({ text: b.note || "Diagram (Mermaid source; could not be drawn as an image):", italics: true, size: 19, color: "66707A" })] }));
+        b.text.split("\n").forEach((l) => children.push(new d.Paragraph({ children: [new d.TextRun({ text: l, font: "Courier New", size: 17 })] }))); break;
+      }
+      case "code": b.text.split("\n").forEach((l) => children.push(new d.Paragraph({ children: [new d.TextRun({ text: l, font: "Courier New", size: 18 })] }))); break;
       case "rule": children.push(new d.Paragraph({ text: "", border: { bottom: { color: "DDD7C9", space: 1, style: d.BorderStyle.SINGLE, size: 6 } } })); break;
     }
   }

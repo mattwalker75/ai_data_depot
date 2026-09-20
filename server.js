@@ -49,6 +49,8 @@ app.use(express.json({ limit: "20mb" }));
 // pdf.js for the Evidence page view is served from its npm package (the
 // browser has the system fonts a PDF may rely on; Node does not).
 app.use("/vendor/pdfjs", express.static(path.dirname(require.resolve("pdfjs-dist/package.json")), { maxAge: "1d" }));
+// Mermaid draws diagrams: in the preview window (browser) and, headlessly, for PDF/Word files.
+app.use("/vendor/mermaid", express.static(path.join(path.dirname(require.resolve("mermaid/package.json")), "dist"), { maxAge: "1d" }));
 app.use(express.static(path.join(__dirname, "public"), { extensions: ["html"], etag: true, lastModified: true, setHeaders: (res) => res.set("cache-control", "no-cache") }));
 
 const VERSION = require("./package.json").version;
@@ -277,7 +279,7 @@ app.post("/api/chat", wrap(async (req, res) => {
 }));
 
 // ---------------------------------------------------------------- generated documents (OUTPUT/)
-app.get("/api/outputs", wrap((req, res) => res.json({ types: Object.fromEntries(Object.entries(documents.TYPES).map(([k, t]) => [k, { label: t.label, formats: t.formats, default: t.default }])), formats: documents.FORMATS, keep_days: documents.keepDays(), dir: documents.outputDir(), outputs: documents.list(req.query.session || null) })));
+app.get("/api/outputs", wrap((req, res) => res.json({ diagrams: { enabled: documents.diagramsEnabled(), available: require("./src/diagrams").available(), browser: require("./src/diagrams").findBrowser() }, types: Object.fromEntries(Object.entries(documents.TYPES).map(([k, t]) => [k, { label: t.label, formats: t.formats, default: t.default }])), formats: documents.FORMATS, keep_days: documents.keepDays(), dir: documents.outputDir(), outputs: documents.list(req.query.session || null) })));
 app.post("/api/outputs/generate", wrap(async (req, res) => {
   const { request, session_id, history = [], bundle_ids = [], document_id, mode, persona, provider } = req.body || {};
   if (!request || typeof request !== "object") throw new Error("Nothing to generate.");
@@ -311,6 +313,7 @@ const port = Number(process.env.PORT || cfg.server.port || 8300);
 const host = process.env.HOST || cfg.server.host || "127.0.0.1";
 app.listen(port, host, () => {
   const url = `http://${host === "0.0.0.0" ? "localhost" : host}:${port}`;
+  documents.setAppUrl(`http://127.0.0.1:${port}`);
   console.log(`AI Data Depot ${VERSION} — ${url}\n  config: ${config.CONFIG_PATH}\n  data:   ${config.dataDir()}\n  model:  ${cfg.models.active} (${cfg.models.providers[cfg.models.active].chat_model})`);
   indexer.recoverStaleState(); indexer.startWatchers(); indexer.startScheduler();
   try { const n = documents.cleanup(); if (n) console.log(`[output] removed ${n} generated file(s) older than ${documents.keepDays()} days`); } catch (e) { console.warn("[output] cleanup skipped:", e.message); }

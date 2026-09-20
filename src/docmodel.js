@@ -64,9 +64,13 @@ function mdToBlocks(md) {
 
 /** Remove [n] markers and the general-knowledge marker; tidy the spacing they leave behind. */
 function stripCitations(text, marker) {
-  let t = String(text || "").replace(/\s*\[\d{1,2}\](?=[\s.,;:!?)]|$)/g, "");
-  if (marker) t = t.split(marker).join("").replace(/\n{3,}/g, "\n\n");
-  return t.replace(/[ \t]+([.,;:!?])/g, "$1").replace(/[ \t]{2,}/g, " ").trim();
+  // Fenced code (Mermaid diagrams included) is left exactly as written.
+  return String(text || "").split(/(```[\s\S]*?```)/).map((part, i) => {
+    if (i % 2 === 1) return part;
+    let t = part.replace(/\s*\[\d{1,2}\](?=[\s.,;:!?)]|$)/g, "");
+    if (marker) t = t.split(marker).join("").replace(/\n{3,}/g, "\n\n");
+    return t.replace(/[ \t]+([.,;:!?])/g, "$1").replace(/[ \t]{2,}/g, " ");
+  }).join("").trim();
 }
 
 function mapText(blocks, fn) {
@@ -140,7 +144,7 @@ function blocksToHtml(blocks) {
       case "numbered": return `<ol>${b.items.map((i) => `<li>${inlineHtml(i)}</li>`).join("")}</ol>`;
       case "table": return `<table><thead><tr>${b.columns.map((c) => `<th>${inlineHtml(c)}</th>`).join("")}</tr></thead><tbody>${b.rows.map((r) => `<tr>${r.map((c) => `<td>${inlineHtml(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
       case "code": return `<pre>${escapeHtml(b.text)}</pre>`;
-      case "diagram": return `<pre class="mermaid">${escapeHtml(b.text)}</pre>`;
+      case "diagram": return b.image ? `<figure class="diagram"><img src="data:image/png;base64,${b.image}" alt="diagram" style="max-width:100%;height:auto">${b.caption ? `<figcaption>${escapeHtml(b.caption)}</figcaption>` : ""}</figure>` : `<pre class="mermaid">${escapeHtml(b.text)}</pre>`;
       case "rule": return "<hr>";
       default: return "";
     }

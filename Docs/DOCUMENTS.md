@@ -67,8 +67,25 @@ tables, page numbers), Word via `docx` (real headings, lists and tables), Excel 
 (typed cells: numbers and currency become numbers), text as Markdown. Word and Excel have no
 in-browser preview, so the Files tab shows the app's HTML rendering of the same content for them.
 
-Diagrams (Mermaid flowcharts in a document) are reserved in the document model as a block and
-will be rendered in a later step.
+## Diagrams
+
+Memos, summaries and free-form documents may include one small diagram where it helps — a
+process or decision flow, a sequence of steps, a timeline, a pie or bar chart — and you can ask
+for one ("…with a flowchart of the steps"). The model writes it as a Mermaid block
+(`flowchart`, `sequenceDiagram`, `timeline`, `pie`, `xychart-beta`).
+
+Mermaid needs a browser to lay text out, so for PDF and Word files the server borrows your
+installed Chromium browser (Chrome, Edge, Brave or Arc; `output.browser` to point at another)
+headlessly for a moment: it opens the app's own `/diagram.html`, renders the code, captures the
+diagram as a PNG at 2× and embeds it. A diagram that fails to parse is sent back to the model
+once with Mermaid's error; if it still fails, the file prints the Mermaid source with a note
+instead of an image. Without a Chromium browser, files carry the source with a note and the
+preview window still draws the diagram live (Mermaid runs in your browser there). Text/Markdown
+files always keep the Mermaid block; spreadsheets never get diagrams. Requires Node 22+ for the
+DevTools connection (Node 20 works for everything else).
+
+`output.diagrams: false` (Settings → General → *Diagrams in documents*) tells the model not to
+include any.
 
 ## API
 

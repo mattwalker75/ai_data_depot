@@ -5,6 +5,17 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 ## [Unreleased]
 
 ### Added
+- 2026-09-20: **Diagrams in documents.** Memos, summaries and free-form
+  documents may include one small Mermaid diagram (flowchart, sequence,
+  timeline, pie, bar/line) when it helps or when asked. For PDF and Word
+  files the server draws it with your installed Chromium browser (Chrome,
+  Edge, Brave or Arc) headlessly and embeds the PNG; a diagram that fails to
+  parse is sent back to the model once, then falls back to the Mermaid source
+  with a note. The preview window draws diagrams live. Settings → General →
+  *Diagrams in documents* (config `output.diagrams`, `output.browser`). New
+  dependency: `mermaid` (served from its package).
+
+### Added
 - 2026-09-20: Settings → General → **Generated files**: whether a file opens
   in the preview window as soon as it is created (`output.auto_preview`,
   default on) and how many days files are kept (`output.keep_days`).

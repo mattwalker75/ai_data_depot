@@ -23,6 +23,13 @@ const { search } = require("./retrieval");
 const { groundingRules, sourcesBlock, trimHistory, hrefFor } = require("./chat");
 const docmodel = require("./docmodel");
 const render = require("./render");
+const diagrams = require("./diagrams");
+
+let APP_URL = null;
+/** The server tells us its own address once listening; the headless browser loads /diagram.html from it. */
+function setAppUrl(url) { APP_URL = url; }
+function diagramsEnabled() { const o = config.get().output || {}; return o.diagrams !== false; }
+const DIAGRAM_RULE = `You may include ONE diagram where it genuinely helps — a process or decision flow, a sequence of steps, a timeline of dates, or a handful of figures — as a fenced block starting with \`\`\`mermaid. Use only: flowchart LR or TD, sequenceDiagram, timeline, pie, or xychart-beta. Keep it small (at most 12 nodes, short labels, no styling directives), put the block where it belongs in the text, and precede it with one sentence saying what it shows. Do not add a diagram to a document that does not need one.`;
 
 // ---------------------------------------------------------------- types
 const TYPES = {
@@ -202,6 +209,7 @@ async function generateProse(req, c) {
   const system = [c.persona.prompt, "", groundingRules(c.notFound, c.mode, c.marker), "",
     `You are now WRITING A DOCUMENT, not chatting. ${TYPES[req.type].prompt}`,
     `Output only the document body in Markdown — no preamble, no closing remark, no title line (the title "${req.title}" is added by the app). Use headings with #, lists with -, tables with |.`,
+    diagramsEnabled() && req.type !== "checklist" ? DIAGRAM_RULE : "Do not include diagrams or code blocks.",
     c.mode === "sources-only" ? "Every factual statement must cite a SOURCE; leave out anything the sources do not support and say so in one line at the end under a heading \"Not covered by the sources\"." : `Where you rely on general knowledge rather than the SOURCES, start that paragraph with "${c.marker}".`,
     "", hits.length ? "SOURCES:\n\n" + sourcesBlock(hits) : "SOURCES: (none matched)"].join("\n");
   const user = [conversationBlock(c.history || []), "", `DOCUMENT TO WRITE — title: ${req.title}`, req.brief ? `What it must contain: ${req.brief}` : ""].filter(Boolean).join("\n");
@@ -210,7 +218,9 @@ async function generateProse(req, c) {
   // drop a duplicated title line
   md = md.replace(new RegExp(`^#\\s+${req.title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\n`), "");
   const citations = hits.map((h, i) => ({ n: i + 1, title: h.title || h.locator, location: h.location, bundle: h.bundle_name, kind: h.kind, locator: h.locator, href: hrefFor(h), document_id: h.document_id, chunk_id: h.id }));
+  md = await drawDiagrams(md, c.provider);
   const v = docmodel.variants({ title: req.title, markdown: md, citations, marker: c.marker });
+  attachDiagramImages(v);
   if (c.mode === "sources-only" && !v.cited) throw new Error(`${c.notFound} — the model could not support "${req.title}" from your sources.`);
   const basis = v.cited ? (md.includes(c.marker) ? "mixed" : "sources") : "general";
   // xlsx delivery of a prose type (checklist): tables become sheets
@@ -220,6 +230,48 @@ async function generateProse(req, c) {
     if (v.cited) v.cited = { title: req.title, sheets: [...toSheets(v.cited.blocks), { name: "Sources", columns: [{ name: "#", type: "number" }, { name: "Source", type: "text" }, { name: "Where", type: "text" }], rows: v.cited.citations.map((x) => [x.n, x.title, `${x.location ? x.location + " — " : ""}${x.locator}`]) }] };
   }
   return { client: v.client, cited: v.cited, basis, citations: v.cited ? v.cited.citations : [] };
+}
+
+// ---------------------------------------------------------------- diagrams
+const diagramImages = new Map(); // normalised mermaid code → { image, width, height } for the document being built
+const diagKey = (t) => String(t).replace(/\s+/g, " ").trim();
+/**
+ * Render the Mermaid blocks of a Markdown document with the headless browser.
+ * A block that fails to parse is sent back to the model once with the error;
+ * if it still fails (or no browser is available) the block stays as text and
+ * the renderers print a note instead of an image. Returns the (possibly
+ * corrected) Markdown; images are kept in `diagramImages` for attachDiagramImages().
+ */
+async function drawDiagrams(md, provider) {
+  diagramImages.clear();
+  if (!diagramsEnabled() || !/```mermaid/.test(md)) return md;
+  const blocks = docmodel.mdToBlocks(md).filter((b) => b.kind === "diagram");
+  if (!blocks.length) return md;
+  if (!APP_URL || !diagrams.available()) return md;
+  const r = await diagrams.renderBlocks(blocks, APP_URL);
+  for (const b of blocks) if (b.image) diagramImages.set(diagKey(b.text), { image: b.image, width: b.width, height: b.height });
+  if (r.failed.length) {
+    // one correction round
+    const fixes = [];
+    for (const f of r.failed) {
+      const bad = blocks[f.index].text;
+      const fixed = await ask([{ role: "system", content: "You fix Mermaid diagram syntax. Return ONLY the corrected Mermaid code, no fences, no commentary. Keep the meaning; simplify labels if that is what it takes (no parentheses or special characters inside node labels unless quoted)." },
+        { role: "user", content: `This Mermaid code fails with: ${f.error}
+
+${bad}` }], provider);
+      fixes.push({ bad, fixed: fixed.replace(/^```\w*\n?|```$/g, "").trim() });
+    }
+    const retry = fixes.map((x) => ({ kind: "diagram", text: x.fixed }));
+    const r2 = await diagrams.renderBlocks(retry, APP_URL);
+    fixes.forEach((x, i) => { if (retry[i].image) { diagramImages.set(diagKey(x.fixed), { image: retry[i].image, width: retry[i].width, height: retry[i].height }); md = md.replace("```mermaid\n" + x.bad + "\n```", "```mermaid\n" + x.fixed + "\n```"); } });
+    void r2;
+  }
+  return md;
+}
+/** Put rendered images on the diagram blocks of both variants (they were built from the same Markdown). */
+function attachDiagramImages(v) {
+  const put = (blocks) => { for (const b of blocks || []) if (b.kind === "diagram") { const im = diagramImages.get(diagKey(b.text)); if (im) Object.assign(b, im); else b.note = diagrams.available() && APP_URL ? "Diagram could not be drawn (the Mermaid below did not parse):" : "Diagram not drawn — no Chromium browser is installed to render it. The Mermaid source:"; } };
+  put(v.client && v.client.blocks); put(v.cited && v.cited.blocks);
 }
 
 /** Tabular documents: columns first, then rows per document, then merge. */
@@ -293,4 +345,4 @@ function previewHtml(id, variant) {
   return `<h1>${docmodel.escapeHtml(v.title)}</h1>\n${docmodel.blocksToHtml(blocks)}`;
 }
 
-module.exports = { TYPES, FORMATS, FILE_RULE, normalizeRequest, detectIntent, extractRequest, generate, fromText, list, get, remove, setKeep, cleanup, fileFor, outputDir, previewHtml, keepDays };
+module.exports = { setAppUrl, diagramsEnabled, attachDiagramImages, _diagramImages: diagramImages, TYPES, FORMATS, FILE_RULE, normalizeRequest, detectIntent, extractRequest, generate, fromText, list, get, remove, setKeep, cleanup, fileFor, outputDir, previewHtml, keepDays };

@@ -54,8 +54,10 @@ The user is not a developer — every message the UI shows must be a plain Engli
 12. **Generated documents** (`src/documents.js`): the model never writes bytes — it returns
     Markdown or JSON sheets and `src/render.js` makes the file. Types drive prompts; formats only
     deliver. Two copies (client / cited) whenever anything was cited. **Retention deletes only
-    files recorded in the `outputs` table**, never anything else in `OUTPUT/`. Diagrams are a
-    reserved block, not yet rendered.
+    files recorded in the `outputs` table**, never anything else in `OUTPUT/`. Diagrams: the model
+    writes Mermaid; `src/diagrams.js` renders it to PNG with the user's installed Chromium
+    (headless, CDP, `/diagram.html`) — never assume a browser exists; without one the file
+    keeps the source + a note and the preview draws it live.
 ## Testing a change by hand
 Start a scratch instance on another port with its own `data_dir`, add a small folder, index
 it, ask a question, check citations open in the Evidence drawer. The jsdom smoke harness needs
