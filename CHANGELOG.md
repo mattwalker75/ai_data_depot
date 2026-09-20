@@ -5,6 +5,17 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 ## [Unreleased]
 
 ### Changed
+- 2026-09-19: **Bundles carry a description.** Each bundle card on the Sources
+  page has a description field ("2024–2026 federal tax code, IRS publications
+  and the Henderson client file"). The Reading-from drawer in Chat now shows
+  the bundle name with that description under it, instead of a list of file
+  names; without a description it shows "2 folders · 1 website". A bundle
+  that needs attention — a source not indexed, an indexing failure, files
+  that could not be read — carries a ⚠ next to its name whose tooltip lists
+  the issues, and clicking the name (or the ⚠) opens that bundle on the
+  Sources page.
+
+### Changed
 - 2026-09-19: **Chat converses.** "Are you there?" got "Not in your sources" —
   the strict rule was the only rule. There are now two modes, switchable per
   conversation with a **Sources only** tick in the composer (default in

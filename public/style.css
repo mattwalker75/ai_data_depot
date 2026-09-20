@@ -49,8 +49,12 @@ a{color:var(--acc-text)}
 .h{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--mute);font-weight:700;margin:0 0 8px}
 .bundle-list{display:flex;flex-direction:column;gap:8px}
 .bd{border:1px solid var(--line);border-radius:8px;padding:8px 10px} .bd.off{opacity:.55}
-.bd label{display:flex;gap:8px;align-items:center;font-weight:700;font-size:13px;cursor:pointer} .bd input{accent-color:var(--acc);width:14px;height:14px}
-.bd small{display:block;color:var(--mute);font-size:12px;margin:3px 0 0 22px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bdrow{display:flex;gap:8px;align-items:center} .bd input[type=checkbox]{accent-color:var(--acc);width:14px;height:14px;margin:0;cursor:pointer;flex:none}
+.bdname{flex:1;min-width:0;border:none;background:none;text-align:left;font-weight:700;font-size:13px;padding:0;cursor:pointer;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap} .bdname:hover{color:var(--acc-text);text-decoration:underline}
+.bdwarn{border:none;background:var(--warn);color:#fff;border-radius:50%;width:18px;height:18px;font-size:11px;line-height:18px;padding:0;cursor:pointer;flex:none;font-weight:700} .bdwarn:hover{filter:brightness(1.1)}
+.bd small.bddesc{display:block;color:var(--mute);font-size:12px;margin:4px 0 0 22px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.bdescfld{width:100%;border:1px dashed var(--line);border-radius:7px;padding:6px 9px;font-size:13px;background:transparent;margin:2px 0 8px;color:var(--ink)} .bdescfld:focus{border-style:solid;border-color:var(--acc);outline:none;background:var(--panel)}
+.card.flash{animation:flash 1.8s ease-out} @keyframes flash{0%{box-shadow:0 0 0 4px var(--acc)}100%{box-shadow:0 0 0 0 transparent}}
 .bd .st{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ok);margin-left:auto} .bd .st.busy{background:var(--warn)} .bd .st.err{background:var(--bad)} .bd .st.none{background:var(--line)}
 .link{background:none;border:none;color:var(--acc-text);font-weight:700;font-size:12.5px;cursor:pointer;padding:6px 0;text-align:left}
 .idx-strip{margin-top:auto;border-top:1px solid var(--line);padding-top:10px;font-size:12px;color:var(--mute)}

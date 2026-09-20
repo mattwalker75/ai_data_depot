@@ -84,12 +84,37 @@ function bundleStatus(b) {
   if (b.sources.some((s) => s.status === "error")) return "err";
   return "ok";
 }
+/** What, if anything, needs a look on this bundle: unindexed or failed sources, files that could not be read. */
+function bundleIssues(b) {
+  const out = [];
+  for (const s of b.sources) {
+    const short = s.kind === "website" ? s.location.replace(/^https?:\/\//, "") : s.location.split("/").pop() || s.location;
+    if (s.status === "pending") out.push(`${short}: not indexed yet`);
+    else if (s.status === "error") out.push(`${short}: indexing failed${s.last_error ? " — " + s.last_error : ""}`);
+    else if (s.last_error) out.push(`${short}: ${s.last_error}`);
+  }
+  if (!b.sources.length) out.push("no sources yet");
+  return out;
+}
+function bundleSummary(b) {
+  const f = b.sources.filter((s) => s.kind === "path").length, w = b.sources.filter((s) => s.kind === "website").length;
+  return [f ? `${f} folder${f > 1 ? "s" : ""}` : "", w ? `${w} website${w > 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ") || "no sources yet";
+}
 function renderBundles() {
   const el = $("#bundle-list");
   if (!state.bundles.length) { el.innerHTML = `<div class="hint">No bundles yet. A bundle is a set of folders and websites you can switch on or off together.</div>`; return; }
-  el.innerHTML = state.bundles.map((b) => `<div class="bd ${b.enabled ? "" : "off"}"><label><input type="checkbox" data-bundle="${b.id}" ${b.enabled ? "checked" : ""}>${esc(b.name)}<span class="st ${bundleStatus(b)}" title="${bundleStatus(b)}"></span></label>
-    <small title="${esc(b.sources.map((s) => s.location).join("\n"))}">${b.sources.length ? esc(b.sources.map((s) => s.kind === "website" ? s.location.replace(/^https?:\/\//, "") : s.location.split("/").pop() || s.location).join(" · ")) : "no sources yet"}</small></div>`).join("");
+  el.innerHTML = state.bundles.map((b) => { const issues = bundleIssues(b); return `<div class="bd ${b.enabled ? "" : "off"}">
+    <div class="bdrow"><input type="checkbox" data-bundle="${b.id}" ${b.enabled ? "checked" : ""} aria-label="Enable ${esc(b.name)}" title="${b.enabled ? "On — the assistant may read this bundle" : "Off"}">
+      <button class="bdname" data-goto="${b.id}" title="Open this bundle in Sources">${esc(b.name)}</button>
+      ${issues.length ? `<button class="bdwarn" data-goto="${b.id}" title="${esc(issues.join("\n"))}">⚠</button>` : `<span class="st ${bundleStatus(b)}" title="ok"></span>`}</div>
+    <small class="bddesc" title="${esc(b.description || bundleSummary(b))}">${esc(b.description || bundleSummary(b))}</small></div>`; }).join("");
   $$("input[data-bundle]", el).forEach((cb) => cb.addEventListener("change", guard(async () => { await api(`/api/bundles/${cb.dataset.bundle}`, { method: "PATCH", body: { enabled: cb.checked } }); await refresh(); if (state.view === "sources") renderSources(); })));
+  $$("[data-goto]", el).forEach((b) => b.addEventListener("click", () => gotoBundle(Number(b.dataset.goto))));
+}
+/** Jump to a bundle's card on the Sources page and flash it. */
+function gotoBundle(id) {
+  showView("sources");
+  setTimeout(() => { const card = $(`.card[data-bundle="${id}"]`); if (!card) return; card.scrollIntoView({ behavior: "smooth", block: "start" }); card.classList.add("flash"); setTimeout(() => card.classList.remove("flash"), 1800); }, 60);
 }
 function renderWelcome() {
   // The welcome block leaves the thread after the first message; nothing to update then.
@@ -385,10 +410,12 @@ function renderSources() {
   el.innerHTML = state.bundles.map((b) => `<div class="card" data-bundle="${b.id}">
     <div class="ct"><button class="toggle ${b.enabled ? "on" : ""}" data-toggle="${b.id}" title="${b.enabled ? "On — the assistant may read this bundle" : "Off"}" aria-label="Enable bundle"></button><input class="session-name" data-rename="${b.id}" value="${esc(b.name)}" aria-label="Bundle name"><span class="sp"></span>
       <button class="btn sm" data-addpath="${b.id}">+ Folder or file</button><button class="btn sm" data-addweb="${b.id}">+ Website</button><button class="btn sm" data-docs="${b.id}">Documents</button><button class="btn sm danger" data-delbundle="${b.id}">Delete</button></div>
+    <input class="bdescfld" data-descr="${b.id}" value="${esc(b.description || "")}" placeholder="Describe what is in this bundle — shown under its name in Chat (e.g. “2024–2026 federal tax code, IRS publications and the Henderson client file”)" aria-label="Bundle description">
     ${b.sources.length ? b.sources.map((s) => `<div class="srcline ${s.status === "indexing" ? "busy" : ""}" data-loc="${esc(s.location)}"><span class="k">${s.kind === "website" ? "website" : "folder"}</span><span class="loc" title="${esc(s.location)}">${esc(s.location)}</span>${s.kind === "website" ? `<button class="pill scope" data-scope="${s.id}" title="Change what is read from this site">${esc(SCOPE_LABEL[(parseOpts(s).scope) || "linked"])}${parseOpts(s).scope === "linked" || !parseOpts(s).scope ? ` · ${parseOpts(s).depth ?? 2} hops` : ""} ▾</button>` : ""}${srcMeta(s)}<span class="live"></span><button class="btn sm ${s.status === "pending" ? "pri" : ""}" data-reindex="${s.id}" data-label="${s.status === "pending" ? "Index" : s.kind === "website" ? "Re-check" : "Re-index"}" ${s.status === "indexing" ? "disabled" : ""}>${s.status === "indexing" ? `<span class="spin"></span>Indexing…` : s.status === "pending" ? "Index" : s.kind === "website" ? "Re-check" : "Re-index"}</button><button class="btn sm danger" data-delsrc="${s.id}">Remove</button></div>`).join("") : `<div class="hint">No sources yet — add a folder, a file, or a website.</div>`}
     <div class="docs" id="docs-${b.id}" hidden></div></div>`).join("");
   $$("[data-toggle]", el).forEach((t) => t.addEventListener("click", guard(async () => { await api(`/api/bundles/${t.dataset.toggle}`, { method: "PATCH", body: { enabled: !t.classList.contains("on") } }); await refresh(); renderSources(); })));
   $$("[data-rename]", el).forEach((i) => i.addEventListener("change", guard(async () => { await api(`/api/bundles/${i.dataset.rename}`, { method: "PATCH", body: { name: i.value } }); await refresh(); })));
+  $$("[data-descr]", el).forEach((i) => i.addEventListener("change", guard(async () => { await api(`/api/bundles/${i.dataset.descr}`, { method: "PATCH", body: { description: i.value.trim() } }); await refresh(); toast("Description saved."); })));
   $$("[data-addpath]", el).forEach((b) => b.addEventListener("click", guard(async () => { const p = await browse(); if (!p) return; const ready = p.index ? await ensureModelReady() : false; await api(`/api/bundles/${b.dataset.addpath}/sources`, { method: "POST", body: { kind: "path", location: p.path, index: ready } }); toast(ready ? "Added — indexing has started." : "Added. Click Index on it when you are ready."); await refresh(); renderSources(); })));
   $$("[data-addweb]", el).forEach((b) => b.addEventListener("click", guard(() => addWebsite(b.dataset.addweb))));
   $$("[data-reindex]", el).forEach((b) => b.addEventListener("click", guard(async () => { if (!(await ensureModelReady())) return; b.disabled = true; b.innerHTML = `<span class="spin"></span>Starting…`; await api(`/api/sources/${b.dataset.reindex}/index`, { method: "POST" }); })));
