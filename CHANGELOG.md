@@ -5,6 +5,27 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 ## [Unreleased]
 
 ### Changed
+- 2026-09-19: **Websites have a scope.** A registered page whose links fan out
+  across a site (irs.gov/individuals/get-transcript) was read as one page,
+  because the only rule was "everything under this address". Each website
+  source now has a scope, chosen when added and editable on its row: *linked
+  pages* (same site, N link-hops from the page — the new default, 2 hops),
+  *this section* (the old rule), *whole site*, *this page only*. Other
+  websites are never followed; translated copies of pages (`/es/`, `/zh-hans/`
+  …) are skipped unless the start page is one; the pages-per-website cap
+  always applies.
+- 2026-09-19: **"N files could not be read" is now a button** that opens a
+  window listing the failed files grouped by reason, with a Retry.
+
+### Fixed
+- 2026-09-19: **Rate limits lost hundreds of files.** A 10,000-file run against
+  OpenAI failed 683 files on "429 Rate limit reached" and "429 Request too
+  large" — the embedding client had no retry. It now retries rate limits and
+  outages with backoff (honouring Retry-After) and halves a batch the
+  provider calls too large, down to a single passage; a passage that is
+  itself too large is reported with the setting to change.
+
+### Changed
 - 2026-09-19: Settings → Models: a saved API key is shown as its first 5 and
   last 5 characters (`sk-pr••••••••a1b2c`) so you can tell which key it is;
   pasting a new one replaces it. "List models" now opens a sub-window with

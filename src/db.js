@@ -62,6 +62,8 @@ function open() {
     console.warn("[db] sqlite-vec did not load (%s); using in-process vector search", e.message);
   }
   db.exec(SCHEMA);
+  // Per-source options (website scope/depth), added after the first release.
+  try { db.exec("ALTER TABLE sources ADD COLUMN options TEXT"); } catch {}
   return db;
 }
 

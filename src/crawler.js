@@ -18,7 +18,8 @@ const TRACKING = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_c
 function scopeOf(rootUrl) {
   const u = new URL(rootUrl);
   const pagePath = u.pathname.replace(/\/+$/, "");
-  return { origin: u.origin, pagePath: pagePath || "/" };
+  const seg = firstSegment(u.pathname);
+  return { origin: u.origin, pagePath: pagePath || "/", langPrefix: !!seg && LANG_SEG.test(seg) };
 }
 
 function normalize(href, base) {
@@ -33,12 +34,34 @@ function normalize(href, base) {
   return s;
 }
 
-function inScope(url, scope) {
+/**
+ * Scope modes (per website source):
+ *   section  the page and everything under its path   /privacy-disclosure/…
+ *   linked   any page on the same site within N link-hops of the start page
+ *   site     any page on the same site
+ *   page     the start page only
+ * Other hosts are never in scope, whatever the mode.
+ */
+const SCOPES = ["section", "linked", "site", "page"];
+// Sites like irs.gov link every page to its translations (/es/, /zh-hans/,
+// /ko/ …). Those are duplicates that would eat the page budget, so a link
+// whose first path segment is a language code is skipped unless the start
+// page itself lives under one.
+const LANG_SEG = /^(?:[a-z]{2}|zh-han[st]|pt-br|es-mx|fr-ca)$/i;
+function firstSegment(pathname) { return (pathname.split("/").filter(Boolean)[0] || "").toLowerCase(); }
+function isTranslationCopy(url, scope) {
+  const seg = firstSegment(new URL(url).pathname);
+  return !!seg && LANG_SEG.test(seg) && !scope.langPrefix;
+}
+function inScope(url, scope, mode = "section") {
   const u = new URL(url);
   if (u.origin !== scope.origin) return false;
   const p = u.pathname.replace(/\/+$/, "") || "/";
-  // Under the root path: "/privacy-disclosure/anything", or the root page itself.
-  return p === scope.pagePath || p.startsWith(scope.pagePath + "/") || (scope.pagePath === "/" );
+  if (mode === "page") return p === scope.pagePath;
+  if (isTranslationCopy(url, scope) && p !== scope.pagePath) return false;
+  if (mode === "site" || mode === "linked") return true;
+  // section: under the root path, or the root page itself.
+  return p === scope.pagePath || p.startsWith(scope.pagePath + "/") || (scope.pagePath === "/");
 }
 
 async function fetchWithTimeout(url, { timeout, userAgent, headers = {} }) {
@@ -71,8 +94,11 @@ function extractLinks(html, base) {
  * `known` = {url: {etag,lastModified,hash}} lets a re-check send conditional requests.
  * Returns {visited, fetched, skipped, notModified, errors:[{url,error}]}.
  */
-async function crawl(rootUrl, { onPage, known = {}, shouldStop = () => false, log = () => {} } = {}) {
-  const opts = config.get().indexing.websites;
+async function crawl(rootUrl, { onPage, known = {}, shouldStop = () => false, log = () => {}, mode = "section", depth } = {}) {
+  const opts = { ...config.get().indexing.websites };
+  if (!SCOPES.includes(mode)) mode = "section";
+  if (mode === "page") opts.max_depth = 0;
+  else if (mode === "linked") opts.max_depth = Math.max(0, Number(depth) || 2);
   const scope = scopeOf(rootUrl);
   const robots = await robotsFor(scope.origin, opts);
   const start = normalize(rootUrl, rootUrl);
@@ -89,7 +115,7 @@ async function crawl(rootUrl, { onPage, known = {}, shouldStop = () => false, lo
     let resp;
     try { resp = await fetchWithTimeout(url, { ...opts, timeout: opts.timeout_ms, userAgent: opts.user_agent, headers: cond }); }
     catch (e) { stats.errors.push({ url, error: e.name === "AbortError" ? "timed out" : e.message }); continue; }
-    if (resp.status === 304) { stats.notModified++; if (prior.links) for (const l of prior.links) if (!seen.has(l) && inScope(l, scope) && depth + 1 <= opts.max_depth) { seen.add(l); queue.push({ url: l, depth: depth + 1 }); } continue; }
+    if (resp.status === 304) { stats.notModified++; if (prior.links) for (const l of prior.links) if (!seen.has(l) && inScope(l, scope, mode) && depth + 1 <= opts.max_depth) { seen.add(l); queue.push({ url: l, depth: depth + 1 }); } continue; }
     if (!resp.ok) { stats.errors.push({ url, error: `HTTP ${resp.status}` }); continue; }
     const ctype = resp.headers.get("content-type") || "";
     if (!/html|pdf/i.test(ctype)) { stats.skipped++; continue; }
@@ -97,7 +123,7 @@ async function crawl(rootUrl, { onPage, known = {}, shouldStop = () => false, lo
     let doc, links = [];
     try {
       doc = await extractWeb(buf, ctype, url);
-      if (/html/i.test(ctype)) links = extractLinks(buf.toString("utf8"), resp.url || url).filter((l) => inScope(l, scope) && !SKIP_EXT.test(l) || (/\.pdf($|\?)/i.test(l) && inScope(l, scope)));
+      if (/html/i.test(ctype)) links = extractLinks(buf.toString("utf8"), resp.url || url).filter((l) => (inScope(l, scope, mode) && !SKIP_EXT.test(l)) || (/\.pdf($|\?)/i.test(l) && inScope(l, scope, mode)));
     } catch (e) { stats.errors.push({ url, error: e.message }); continue; }
     stats.fetched++;
     for (const l of links) if (!seen.has(l) && depth + 1 <= opts.max_depth) { seen.add(l); queue.push({ url: l, depth: depth + 1 }); }
@@ -109,4 +135,4 @@ async function crawl(rootUrl, { onPage, known = {}, shouldStop = () => false, lo
   return stats;
 }
 
-module.exports = { crawl, scopeOf, inScope, normalize };
+module.exports = { crawl, scopeOf, inScope, normalize, SCOPES };

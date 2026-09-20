@@ -197,7 +197,9 @@ async function indexWebsiteSource(source, progress) {
   }
   let n = 0, added = 0, unchanged = 0, failed = 0;
   const seenNow = new Set();
+  let options = {}; try { options = JSON.parse(source.options || "{}") || {}; } catch {}
   const stats = await crawl(source.location, {
+    mode: options.scope || "linked", depth: options.depth ?? 2,
     known, shouldStop: () => stopRequested,
     log: (m) => progress(n, cap, m),
     onPage: async (page) => {
@@ -291,6 +293,17 @@ function startScheduler() {
   }, 10 * 60 * 1000);
 }
 
+/** Failed documents of a source, grouped by reason, for the "could not be read" window. */
+function sourceErrors(sourceId) {
+  const rows = open().prepare("SELECT locator, title, error FROM documents WHERE source_id=? AND status='error' ORDER BY error, locator").all(sourceId);
+  const groups = new Map();
+  for (const r of rows) {
+    const key = String(r.error || "unknown").replace(/\s+/g, " ").slice(0, 140);
+    if (!groups.has(key)) groups.set(key, { reason: key, count: 0, files: [] });
+    const g = groups.get(key); g.count++; if (g.files.length < 200) g.files.push(r.locator);
+  }
+  return { total: rows.length, groups: [...groups.values()].sort((a, b) => b.count - a.count) };
+}
 function jobs(limit = 20) { return open().prepare("SELECT * FROM jobs ORDER BY id DESC LIMIT ?").all(limit); }
 
 /** On startup: anything left 'running' or 'indexing' by a previous process died with it. */
@@ -301,4 +314,4 @@ function recoverStaleState() {
   if (n) console.warn(`[index] ${n} job(s) were interrupted by a restart`);
 }
 
-module.exports = { embeddingReady, recoverStaleState, events, indexFiles, indexWebsites, indexSource, stop, current, jobs, startWatchers, stopWatchers, startScheduler, walk };
+module.exports = { sourceErrors, embeddingReady, recoverStaleState, events, indexFiles, indexWebsites, indexSource, stop, current, jobs, startWatchers, stopWatchers, startScheduler, walk };

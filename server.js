@@ -69,12 +69,22 @@ app.post("/api/bundles/:id/sources", wrap((req, res) => {
   if (!location) throw new Error(kind === "website" ? "Enter the website address." : "Enter a folder or file path.");
   if (kind === "website") { if (!/^https?:\/\//i.test(location)) location = "https://" + location; new URL(location); }
   else { const abs = config.expandHome(location); if (!fs.existsSync(abs)) throw new Error(`"${location}" does not exist on this computer.`); }
-  const id = db.prepare("INSERT INTO sources(bundle_id, kind, location) VALUES (?,?,?)").run(b.id, kind, location).lastInsertRowid;
+  const options = kind === "website" ? JSON.stringify(sourceOptions(req.body.options)) : null;
+  const id = db.prepare("INSERT INTO sources(bundle_id, kind, location, options) VALUES (?,?,?,?)").run(b.id, kind, location, options).lastInsertRowid;
   if (kind === "path") indexer.startWatchers();
   // Indexing is a deliberate step the user starts (Sources → Index), unless asked for here.
   if (req.body.index === true) indexer.indexSource(id);
   res.json({ id, indexed: req.body.index === true });
 }));
+const { SCOPES } = require("./src/crawler");
+function sourceOptions(o) { o = o || {}; return { scope: SCOPES.includes(o.scope) ? o.scope : "linked", depth: Math.max(0, Math.min(10, Number(o.depth ?? 2) || 0)) }; }
+app.patch("/api/sources/:id", wrap((req, res) => {
+  const s = db.prepare("SELECT * FROM sources WHERE id=?").get(req.params.id); if (!s) throw new Error("No such source.");
+  if (s.kind !== "website") throw new Error("Only websites have scope options.");
+  db.prepare("UPDATE sources SET options=? WHERE id=?").run(JSON.stringify(sourceOptions(req.body.options)), s.id);
+  res.json({ ok: true, options: sourceOptions(req.body.options) });
+}));
+app.get("/api/sources/:id/errors", wrap((req, res) => res.json(indexer.sourceErrors(Number(req.params.id)))));
 app.delete("/api/sources/:id", wrap((req, res) => { db.prepare("DELETE FROM sources WHERE id=?").run(req.params.id); indexer.startWatchers(); res.json({ ok: true }); }));
 app.post("/api/sources/:id/index", wrap((req, res) => res.json({ job: indexer.indexSource(Number(req.params.id)) })));
 app.get("/api/bundles/:id/documents", wrap((req, res) => res.json(db.prepare("SELECT id, source_id, kind, locator, title, mime, bytes, page_count, char_count, ocr_pages, indexed_at, status, CASE WHEN status='error' THEN error END AS error FROM documents WHERE bundle_id=? ORDER BY kind, title LIMIT 2000").all(req.params.id))));

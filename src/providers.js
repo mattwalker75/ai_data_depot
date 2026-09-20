@@ -55,7 +55,8 @@ async function request(p, path, body, { stream = false, timeout } = {}) {
     let detail = "";
     try { const j = await resp.json(); detail = (j.error && (j.error.message || j.error)) || JSON.stringify(j); } catch { detail = await resp.text().catch(() => ""); }
     const hint = resp.status === 401 ? " Check the API key in Settings → Models." : resp.status === 404 ? " Check the model name and base URL." : "";
-    throw new Error(`${p.label} answered ${resp.status}: ${String(detail).slice(0, 300)}.${hint}`);
+    const ra = resp.headers.get("retry-after"); const raNote = resp.status === 429 && ra ? ` (retry-after ${ra})` : "";
+    throw new Error(`${p.label} answered ${resp.status}${raNote}: ${String(detail).slice(0, 300)}.${hint}`);
   }
   if (!stream) { clearTimeout(t); return resp.json(); }
   return { resp, done: () => clearTimeout(t) };
@@ -118,18 +119,42 @@ async function chat(messages, { onToken, temperature, max_tokens, model, provide
   return full;
 }
 
-/** Embeddings for a batch of texts -> Float32Array[] (all the same dimension). */
+/** Embeddings for a batch of texts -> Float32Array[] (all the same dimension).
+ * Rate limits (429) are retried with backoff, honouring Retry-After; a
+ * "request too large" answer halves the batch and tries again, down to one
+ * text — a run over ten thousand files must not lose hundreds to a busy
+ * minute at the provider. */
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function embedBatch(p, slice, attempt = 0) {
+  try {
+    const j = await request(p, "/embeddings", { model: p.embedding_model, input: slice });
+    const data = (j.data || []).slice().sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+    if (data.length !== slice.length) throw new Error(`${p.label} returned ${data.length} embeddings for ${slice.length} inputs.`);
+    return data.map((d) => Float32Array.from(d.embedding));
+  } catch (e) {
+    const msg = String(e.message || "");
+    const tooLarge = /too large|maximum context length|context_length|too many tokens|max.*tokens/i.test(msg);
+    if (tooLarge && slice.length > 1) {
+      const half = Math.ceil(slice.length / 2);
+      return [...(await embedBatch(p, slice.slice(0, half))), ...(await embedBatch(p, slice.slice(half)))];
+    }
+    if (tooLarge) throw new Error(`One passage is too large for ${p.embedding_model} (${msg.slice(0, 120)}). Lower "Passage size" in Settings → Indexing · Files.`);
+    const rateLimited = /\b429\b|rate limit|too many requests/i.test(msg);
+    const transient = rateLimited || /\b(500|502|503|504)\b|did not answer within|not reachable/i.test(msg);
+    if (transient && attempt < 6) {
+      const retryAfter = Number((msg.match(/retry(?:-| )after[^0-9]*(\d+)/i) || [])[1]) || 0;
+      const wait = Math.min(60000, retryAfter ? retryAfter * 1000 : 1500 * 2 ** attempt) + Math.random() * 500;
+      await sleep(wait);
+      return embedBatch(p, slice, attempt + 1);
+    }
+    throw e;
+  }
+}
 async function embed(texts, { provider } = {}) {
   const p = provider ? providerConfig(provider) : embeddingProvider();
   const out = [];
   const batch = config.get().embeddings.batch_size || 32;
-  for (let i = 0; i < texts.length; i += batch) {
-    const slice = texts.slice(i, i + batch);
-    const j = await request(p, "/embeddings", { model: p.embedding_model, input: slice });
-    const data = (j.data || []).slice().sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-    if (data.length !== slice.length) throw new Error(`${p.label} returned ${data.length} embeddings for ${slice.length} inputs.`);
-    for (const d of data) out.push(Float32Array.from(d.embedding));
-  }
+  for (let i = 0; i < texts.length; i += batch) out.push(...(await embedBatch(p, texts.slice(i, i + batch))));
   return out;
 }
 

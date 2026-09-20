@@ -87,3 +87,40 @@ test("chat: grounding rules require citations and the not-found phrase", () => {
   const r = groundingRules("Not in your sources");
   assert.match(r, /ONLY from the numbered SOURCES/); assert.match(r, /"Not in your sources"/); assert.match(r, /\[2\]/);
 });
+
+test("crawler: scope modes — section, linked/site, page", () => {
+  const { scopeOf, inScope } = require("../src/crawler");
+  const s = scopeOf("https://www.irs.gov/individuals/get-transcript");
+  const other = "https://www.irs.gov/forms-pubs/about-form-4506";
+  assert.equal(inScope(other, s, "section"), false, "section: a sibling path is out");
+  assert.equal(inScope(other, s, "linked"), true, "linked: same site is in (depth limits it)");
+  assert.equal(inScope(other, s, "site"), true);
+  assert.equal(inScope(other, s, "page"), false);
+  assert.equal(inScope("https://www.irs.gov/individuals/get-transcript", s, "page"), true);
+  assert.equal(inScope("https://example.org/individuals/get-transcript", s, "site"), false, "another host never");
+  assert.equal(inScope("https://www.irs.gov/es/individuals/get-transcript", s, "linked"), false, "a translated copy is skipped");
+  assert.equal(inScope("https://www.irs.gov/zh-hans/individuals", s, "site"), false);
+  const es = scopeOf("https://www.irs.gov/es/individuals/get-transcript");
+  assert.equal(inScope("https://www.irs.gov/es/forms", es, "site"), true, "…unless the start page itself is a translation");
+});
+
+test("embeddings: rate limits retry, oversized batches halve, other errors surface", async () => {
+  const providers = require("../src/providers");
+  config.update({ models: { active: "custom", providers: { custom: { label: "Fake", base_url: "http://fake.test/v1", api_key: "k", chat_model: "c", embedding_model: "e" } } }, embeddings: { batch_size: 4 } });
+  const calls = [];
+  const realFetch = global.fetch;
+  global.fetch = async (url, opts) => {
+    const body = JSON.parse(opts.body); const n = body.input.length; calls.push(n);
+    const ok = (k) => new Response(JSON.stringify({ data: Array.from({ length: k }, (_, i) => ({ index: i, embedding: [i, 1] })) }), { status: 200, headers: { "content-type": "application/json" } });
+    if (calls.length === 1) return new Response(JSON.stringify({ error: { message: "Rate limit reached" } }), { status: 429, headers: { "content-type": "application/json", "retry-after": "0" } });
+    if (n === 4) return new Response(JSON.stringify({ error: { message: "Request too large for e" } }), { status: 429, headers: { "content-type": "application/json" } });
+    return ok(n);
+  };
+  try {
+    const out = await providers.embed(["a", "b", "c", "d"]);
+    assert.equal(out.length, 4, "every text embedded after the retry and the halving");
+    assert.deepEqual(calls, [4, 4, 2, 2], "429 retried once, 'too large' split into two halves");
+    global.fetch = async () => new Response(JSON.stringify({ error: { message: "Incorrect API key" } }), { status: 401, headers: { "content-type": "application/json" } });
+    await assert.rejects(providers.embed(["x"]), /401/, "a non-transient error is not retried into oblivion");
+  } finally { global.fetch = realFetch; }
+});

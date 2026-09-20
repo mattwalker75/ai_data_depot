@@ -34,9 +34,11 @@ bare words (`start`, `stop`, …) work too. `./INSTALL_APP.sh --help` likewise (
 2. **Indexing** — files (text, Markdown, HTML, PDF incl. scanned pages via OCR, Word, Excel, CSV,
    PowerPoint, JSON, RTF) and websites are split into passages and indexed (vector + keyword) in a
    local SQLite database. Folders are watched for new files; websites are re-checked on a schedule.
-   A website source covers **everything under its address**: `https://www.irs.gov/privacy-disclosure`
-   includes `/privacy-disclosure/tax-code-regulations-and-official-guidance`. Nothing outside that
-   scope is ever fetched — this is deliberately not a search engine.
+   Each website source has a **scope**: *linked pages* (the page and what it links to on the same
+   site, N hops — the default), *this section* (everything under its address, e.g.
+   `https://www.irs.gov/privacy-disclosure` covers `/privacy-disclosure/…`), *whole site*, or *this
+   page only*. Other websites are never followed, translated copies (`/es/…`) are skipped, and
+   every mode stops at the pages-per-website cap — this is deliberately not a search engine.
 3. **Ask** — the best passages from the enabled bundles are handed to the model, which must cite them
    as `[1]`, `[2]`… Click a citation to see the exact passage in the Evidence drawer and open the
    file or page. "How I answered" under each reply lists what was searched, read and skipped.

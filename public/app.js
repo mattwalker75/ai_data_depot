@@ -106,11 +106,21 @@ async function newBundle() {
   if (!v) return;
   await refresh(); showView("sources"); renderSources(); toast(`Bundle “${v.name}” created — now add a folder, a file or a website to it.`);
 }
+const SCOPE_OPTIONS = [
+  { value: "linked", label: "Linked pages — this page and pages it links to, on the same site, up to N hops" },
+  { value: "section", label: "This section — this page and everything under its address (/section/…)" },
+  { value: "site", label: "Whole site — any page on this website" },
+  { value: "page", label: "This page only" }];
+const SCOPE_LABEL = { linked: "linked pages", section: "this section", site: "whole site", page: "page only" };
+const scopeFields = (o = {}) => [
+  { id: "scope", type: "select", label: "What to read", value: o.scope || "linked", options: SCOPE_OPTIONS, help: "Other websites are never followed. Every mode stops at the pages-per-website cap in Settings → Indexing · Websites." },
+  { id: "depth", type: "number", label: "Link hops (Linked pages only)", value: o.depth ?? 2, min: 0, max: 10, help: "1 = the page and what it links to; 2 = one step further. Each hop multiplies the pages." }];
 async function addWebsite(bundleId) {
   const v = await formDialog({ title: "Add a website", submit: "Add", fields: [
-    { id: "url", label: "Website address", mono: true, placeholder: "https://www.irs.gov/privacy-disclosure", autofocus: true, help: "Everything under this address is in scope — that example also covers /privacy-disclosure/tax-code-regulations-and-official-guidance. Nothing outside it is ever fetched." },
+    { id: "url", label: "Website address", mono: true, placeholder: "https://www.irs.gov/individuals/get-transcript", autofocus: true },
+    ...scopeFields(),
     { id: "index", type: "checkbox", label: "Read it right away", value: false, help: "otherwise click Index on the source when you are ready — until then the assistant cannot read it" }],
-    onSubmit: async (v) => { if (!v.url) throw new Error("Enter the website address."); await api(`/api/bundles/${bundleId}/sources`, { method: "POST", body: { kind: "website", location: v.url, index: false } }); } });
+    onSubmit: async (v) => { if (!v.url) throw new Error("Enter the website address."); await api(`/api/bundles/${bundleId}/sources`, { method: "POST", body: { kind: "website", location: v.url, index: false, options: { scope: v.scope, depth: Number(v.depth) } } }); } });
   if (!v) return;
   await refresh(); renderSources();
   if (v.index) { if (await ensureModelReady()) { const src = state.bundles.flatMap((b) => b.sources).find((x) => x.location === v.url || x.location === "https://" + v.url); if (src) await api(`/api/sources/${src.id}/index`, { method: "POST" }); toast("Added — reading the site now."); } }
@@ -139,7 +149,9 @@ function formDialog({ title, fields = [], submit = "Save", cancel = "Cancel", me
     $("#form-title").textContent = title; $("#form-submit").textContent = submit; $("#form-cancel").textContent = cancel; err.hidden = true;
     $("#form-fields").innerHTML = (message ? `<p style="margin:0;font-size:14px;line-height:1.5">${message}</p>` : "") + fields.map((f) => f.type === "checkbox"
       ? `<label class="chk" style="color:var(--ink);font-weight:500;font-size:13px"><input type="checkbox" id="ff-${f.id}" ${f.value ? "checked" : ""}> ${esc(f.label)}${f.help ? ` <span class="hint">${esc(f.help)}</span>` : ""}</label>`
-      : `<div><label for="ff-${f.id}">${esc(f.label)}</label><input class="fld${f.mono ? " mono" : ""}" id="ff-${f.id}" value="${esc(f.value || "")}" placeholder="${esc(f.placeholder || "")}">${f.help ? `<div class="help">${esc(f.help)}</div>` : ""}</div>`).join("");
+      : f.type === "select"
+      ? `<div><label for="ff-${f.id}">${esc(f.label)}</label><select class="fld" id="ff-${f.id}">${f.options.map((o) => `<option value="${esc(o.value)}" ${o.value === f.value ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select>${f.help ? `<div class="help">${esc(f.help)}</div>` : ""}</div>`
+      : `<div><label for="ff-${f.id}">${esc(f.label)}</label><input class="fld${f.mono ? " mono" : ""}" id="ff-${f.id}" type="${f.type === "number" ? "number" : "text"}" ${f.min !== undefined ? `min="${f.min}"` : ""} ${f.max !== undefined ? `max="${f.max}"` : ""} value="${esc(f.value ?? "")}" placeholder="${esc(f.placeholder || "")}">${f.help ? `<div class="help">${esc(f.help)}</div>` : ""}</div>`).join("");
     const values = () => Object.fromEntries(fields.map((f) => [f.id, f.type === "checkbox" ? $(`#ff-${f.id}`).checked : $(`#ff-${f.id}`).value.trim()]));
     let done = false;
     const finish = (v) => { if (done) return; done = true; if (dlg.open) dlg.close(); resolve(v); };
@@ -316,7 +328,7 @@ function srcMeta(s) {
   if (s.status === "indexing") return `<span class="pill busy">indexing</span>`;
   if (s.status === "error") return `<span class="pill err" title="${esc(s.last_error || "")}">error</span>`;
   if (s.status === "pending") return `<span class="pill">not indexed</span>`;
-  return `<span class="pill ok">${s.doc_count} ${s.kind === "website" ? "pages" : "files"}</span> ${s.last_indexed_at ? `<span class="meta">${fmtWhen(s.last_indexed_at)}</span>` : ""}${s.last_error ? ` <span class="meta err" title="${esc(s.last_error)}">⚠</span>` : ""}`;
+  return `<span class="pill ok">${s.doc_count} ${s.kind === "website" ? "pages" : "files"}</span> ${s.last_indexed_at ? `<span class="meta">${fmtWhen(s.last_indexed_at)}</span>` : ""}${s.last_error ? ` <button class="errbtn" data-errors="${s.id}" title="Click to see which files and why">⚠ ${esc(s.last_error)}</button>` : ""}`;
 }
 /** Before any indexing starts: a quick "hello" to the embedding model. If it
  * fails, an error window says what to set up and nothing is queued. */
@@ -340,6 +352,23 @@ async function renderReadyNotice() {
     $("#ready-settings").onclick = () => { state.sec = "models"; $$("#smenu button").forEach((x) => x.classList.toggle("on", x.dataset.sec === "models")); showView("settings"); };
   } catch { el.hidden = true; }
 }
+function parseOpts(s) { try { return JSON.parse(s.options || "{}") || {}; } catch { return {}; } }
+async function showSourceErrors(sourceId) {
+  const r = await api(`/api/sources/${sourceId}/errors`);
+  const body = r.total ? r.groups.map((g) => `<details style="margin:6px 0"><summary style="cursor:pointer"><b>${g.count}</b> — ${esc(g.reason)}</summary><div style="font-family:var(--mono);font-size:11.5px;max-height:160px;overflow:auto;margin:6px 0 0 12px;color:var(--mute)">${g.files.map(esc).join("<br>")}${g.count > g.files.length ? `<br>… and ${g.count - g.files.length} more` : ""}</div></details>`).join("")
+    : "No failed files any more.";
+  const rateLimited = r.groups.some((g) => /429|rate limit|too large/i.test(g.reason));
+  const v = await formDialog({ title: `${r.total} file${r.total === 1 ? "" : "s"} could not be read`, submit: "Retry the failed files", cancel: "Close",
+    message: `${body}${rateLimited ? `<p class="hint" style="margin-top:10px">Rate-limit and "too large" failures are the provider being busy or a batch being too big — they are retried automatically now, so a Retry should clear them.</p>` : ""}`, onSubmit: async () => {} });
+  if (v) { if (!(await ensureModelReady())) return; await api(`/api/sources/${sourceId}/index`, { method: "POST" }); toast("Retrying — failed files are read again; unchanged ones are skipped."); }
+}
+async function editScope(sourceId) {
+  const src = state.bundles.flatMap((b) => b.sources).find((x) => x.id === sourceId); if (!src) return;
+  const v = await formDialog({ title: "What to read from this website", submit: "Save", fields: scopeFields(parseOpts(src)),
+    message: `<span style="font-family:var(--mono);font-size:12px">${esc(src.location)}</span>`,
+    onSubmit: async (v) => { await api(`/api/sources/${sourceId}`, { method: "PATCH", body: { options: { scope: v.scope, depth: Number(v.depth) } } }); } });
+  if (v) { await refresh(); renderSources(); toast("Saved — click Re-check to read the site with the new scope."); }
+}
 function renderSources() {
   renderReadyNotice();
   const el = $("#sources-page");
@@ -347,13 +376,15 @@ function renderSources() {
   el.innerHTML = state.bundles.map((b) => `<div class="card" data-bundle="${b.id}">
     <div class="ct"><button class="toggle ${b.enabled ? "on" : ""}" data-toggle="${b.id}" title="${b.enabled ? "On — the assistant may read this bundle" : "Off"}" aria-label="Enable bundle"></button><input class="session-name" data-rename="${b.id}" value="${esc(b.name)}" aria-label="Bundle name"><span class="sp"></span>
       <button class="btn sm" data-addpath="${b.id}">+ Folder or file</button><button class="btn sm" data-addweb="${b.id}">+ Website</button><button class="btn sm" data-docs="${b.id}">Documents</button><button class="btn sm danger" data-delbundle="${b.id}">Delete</button></div>
-    ${b.sources.length ? b.sources.map((s) => `<div class="srcline ${s.status === "indexing" ? "busy" : ""}" data-loc="${esc(s.location)}"><span class="k">${s.kind === "website" ? "website" : "folder"}</span><span class="loc" title="${esc(s.location)}">${esc(s.location)}</span>${srcMeta(s)}<span class="live"></span><button class="btn sm ${s.status === "pending" ? "pri" : ""}" data-reindex="${s.id}" data-label="${s.status === "pending" ? "Index" : s.kind === "website" ? "Re-check" : "Re-index"}" ${s.status === "indexing" ? "disabled" : ""}>${s.status === "indexing" ? `<span class="spin"></span>Indexing…` : s.status === "pending" ? "Index" : s.kind === "website" ? "Re-check" : "Re-index"}</button><button class="btn sm danger" data-delsrc="${s.id}">Remove</button></div>`).join("") : `<div class="hint">No sources yet — add a folder, a file, or a website.</div>`}
+    ${b.sources.length ? b.sources.map((s) => `<div class="srcline ${s.status === "indexing" ? "busy" : ""}" data-loc="${esc(s.location)}"><span class="k">${s.kind === "website" ? "website" : "folder"}</span><span class="loc" title="${esc(s.location)}">${esc(s.location)}</span>${s.kind === "website" ? `<button class="pill scope" data-scope="${s.id}" title="Change what is read from this site">${esc(SCOPE_LABEL[(parseOpts(s).scope) || "linked"])}${parseOpts(s).scope === "linked" || !parseOpts(s).scope ? ` · ${parseOpts(s).depth ?? 2} hops` : ""} ▾</button>` : ""}${srcMeta(s)}<span class="live"></span><button class="btn sm ${s.status === "pending" ? "pri" : ""}" data-reindex="${s.id}" data-label="${s.status === "pending" ? "Index" : s.kind === "website" ? "Re-check" : "Re-index"}" ${s.status === "indexing" ? "disabled" : ""}>${s.status === "indexing" ? `<span class="spin"></span>Indexing…` : s.status === "pending" ? "Index" : s.kind === "website" ? "Re-check" : "Re-index"}</button><button class="btn sm danger" data-delsrc="${s.id}">Remove</button></div>`).join("") : `<div class="hint">No sources yet — add a folder, a file, or a website.</div>`}
     <div class="docs" id="docs-${b.id}" hidden></div></div>`).join("");
   $$("[data-toggle]", el).forEach((t) => t.addEventListener("click", guard(async () => { await api(`/api/bundles/${t.dataset.toggle}`, { method: "PATCH", body: { enabled: !t.classList.contains("on") } }); await refresh(); renderSources(); })));
   $$("[data-rename]", el).forEach((i) => i.addEventListener("change", guard(async () => { await api(`/api/bundles/${i.dataset.rename}`, { method: "PATCH", body: { name: i.value } }); await refresh(); })));
   $$("[data-addpath]", el).forEach((b) => b.addEventListener("click", guard(async () => { const p = await browse(); if (!p) return; const ready = p.index ? await ensureModelReady() : false; await api(`/api/bundles/${b.dataset.addpath}/sources`, { method: "POST", body: { kind: "path", location: p.path, index: ready } }); toast(ready ? "Added — indexing has started." : "Added. Click Index on it when you are ready."); await refresh(); renderSources(); })));
   $$("[data-addweb]", el).forEach((b) => b.addEventListener("click", guard(() => addWebsite(b.dataset.addweb))));
   $$("[data-reindex]", el).forEach((b) => b.addEventListener("click", guard(async () => { if (!(await ensureModelReady())) return; b.disabled = true; b.innerHTML = `<span class="spin"></span>Starting…`; await api(`/api/sources/${b.dataset.reindex}/index`, { method: "POST" }); })));
+  $$("[data-errors]", el).forEach((b) => b.addEventListener("click", guard(() => showSourceErrors(Number(b.dataset.errors)))));
+  $$("[data-scope]", el).forEach((b) => b.addEventListener("click", guard(() => editScope(Number(b.dataset.scope)))));
   $$("[data-delsrc]", el).forEach((b) => b.addEventListener("click", guard(async () => { if (!confirm("Remove this source and everything indexed from it?")) return; await api(`/api/sources/${b.dataset.delsrc}`, { method: "DELETE" }); await refresh(); renderSources(); })));
   $$("[data-delbundle]", el).forEach((b) => b.addEventListener("click", guard(async () => { if (!confirm("Delete this bundle, its sources and everything indexed from them?")) return; await api(`/api/bundles/${b.dataset.delbundle}`, { method: "DELETE" }); await refresh(); renderSources(); })));
   $$("[data-docs]", el).forEach((b) => b.addEventListener("click", guard(async () => { const box = $(`#docs-${b.dataset.docs}`); if (!box.hidden) { box.hidden = true; return; } const docs = await api(`/api/bundles/${b.dataset.docs}/documents`); box.hidden = false;
