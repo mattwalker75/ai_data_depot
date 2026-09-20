@@ -4,6 +4,31 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 
 ## [Unreleased]
 
+### Security
+- 2026-09-20: **Local trust boundary.** Every request must carry a `Host`
+  naming this machine (defeats DNS rebinding — a web page cannot reach the
+  API through a hostname it controls), and state-changing requests must be
+  same-origin (`Sec-Fetch-Site` / `Origin`), so another site in your browser
+  cannot POST here. `/api/open` opens only files and pages that are in the
+  index — never an arbitrary path. `config.json` (API keys) is written with
+  owner-only permissions. The grounding rules tell the model that quoted
+  sources are information, not instructions. See `Docs/SECURITY.md`.
+
+### Changed
+- 2026-09-20: **Storage.** Embeddings were stored twice (a BLOB on every
+  chunk *and* the sqlite-vec row); with sqlite-vec loaded the BLOB is no
+  longer written and existing duplicates are dropped once at startup (a
+  10,000-document index shrinks from 2.8 GB to 1.8 GB after **Settings →
+  General → Compact the database**, which is new). Vectors of deleted
+  sources/documents are swept after every job and deletion (they used to
+  linger in nearest-neighbour results). The `jobs` history is pruned to 200.
+  Conditional-request data for web pages moved from the `error` column to
+  its own `meta` column (migrated automatically).
+- 2026-09-20: Documentation moved to `Docs/` (user guide, configuration,
+  architecture, API, security, development); `README.md` is the short front
+  page; `CLAUDE.md` added for LLM sessions; `public/app.js` gained a
+  structural header and JSDoc on its main functions.
+
 ### Fixed
 - 2026-09-20: **Changing a website's scope had no effect on Re-check.** The
   re-check sends conditional requests; on "304 Not Modified" the crawler
