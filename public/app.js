@@ -214,10 +214,14 @@ function renderPersonaSelect() {
 }
 
 // ---------------------------------------------------------------- markdown + citations
+/** Turn bare http(s) URLs in already-escaped text into links (trailing punctuation stays outside). */
+function linkify(escaped) {
+  return escaped.replace(/(https?:\/\/[^\s<>"']+?)([.,;:!?)\]]*)(?=\s|$|<)/g, (m, url, tail) => `<a href="${url}" target="_blank" rel="noopener">${url}</a>${tail}`);
+}
 function md(src) {
   const lines = String(src).replace(/\r/g, "").split("\n");
   let html = "", i = 0, para = [];
-  const inline = (s) => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<i>$2</i>").replace(/\[(\d{1,2})\]/g, '<button class="r" data-cite="$1">$1</button>');
+  const inline = (s) => linkify(esc(s).replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<i>$2</i>").replace(/\[(\d{1,2})\]/g, '<button class="r" data-cite="$1">$1</button>');
   const marker = (state.config && state.config.chat.general_marker) || "From general knowledge, not your sources:";
   const flush = () => { if (para.length) { let t = para.join(" "); if (t.startsWith(marker)) { html += `<div class="gk"><b style="font-size:12px;color:var(--warn)">${esc(marker.replace(/:$/, ""))}</b><br>${inline(t.slice(marker.length).trim())}</div>`; } else html += `<p>${inline(t)}</p>`; para = []; } };
   while (i < lines.length) {
@@ -300,8 +304,8 @@ function showCitation(c, all) {
   openRightDrawer(); switchTab("passage");
   const ev = $("#evidence");
   const where = [c.bundle, c.location].filter(Boolean).join(" · ");
-  ev.innerHTML = `<div class="doc"><div class="t">${esc(c.title)}</div><div class="w">${esc(c.kind === "web" ? c.locator : c.locator)}${where ? " · " + esc(where) : ""}</div><div class="pg">${esc(c.excerpt)}</div>
-    <div class="nx"><button class="btn sm" id="ev-prev">‹ Prev</button><button class="btn sm" id="ev-next">Next ›</button><button class="btn sm pri" id="ev-open">${c.kind === "web" ? "Open page" : "Open file"}</button></div></div>`;
+  ev.innerHTML = `<div class="doc"><div class="nx" style="margin:0 0 10px"><button class="btn sm" id="ev-prev">‹ Prev</button><button class="btn sm" id="ev-next">Next ›</button><span class="sp" style="flex:1"></span><button class="btn sm pri" id="ev-open">${c.kind === "web" ? "Open page" : "Open file"}</button></div>
+    <div class="t">${esc(c.title)}</div><div class="w">${c.kind === "web" ? `<a href="${esc(c.locator)}" target="_blank" rel="noopener">${esc(c.locator)}</a>` : esc(c.locator)}${where ? " · " + esc(where) : ""}</div><div class="pg">${linkify(esc(c.excerpt))}</div></div>`;
   const list = all || state.lastCitations; const idx = list.findIndex((x) => x.n === c.n);
   $("#ev-prev").disabled = idx <= 0; $("#ev-next").disabled = idx < 0 || idx >= list.length - 1;
   $("#ev-prev").onclick = () => showCitation(list[idx - 1], list); $("#ev-next").onclick = () => showCitation(list[idx + 1], list);

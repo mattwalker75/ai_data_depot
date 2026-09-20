@@ -27,6 +27,7 @@ ${cite}`;
 - For a question the SOURCES answer, answer from them and cite; prefer them over your own knowledge whenever they cover the point.
 - For a question the SOURCES do not cover (or only partly), answer from your general knowledge — but make that unmistakable: begin that part with "${marker}" on its own line, and never attach a citation to it. If part of the answer IS in the sources, cite that part and label only the rest.
 - Never present general knowledge as if it came from the sources, and never make up a citation. If you are not sure, say so.
+- Never answer with just "${notFound}" or a refusal in this mode: if the sources don't cover it, give the general-knowledge answer under the label. If a source merely LINKS to the topic (a "Links on this page" entry), say so and give that link.
 ${cite}`;
 }
 

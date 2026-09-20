@@ -4,6 +4,28 @@ All notable changes to AI Data Depot are tracked here (Keep a Changelog style).
 
 ## [Unreleased]
 
+### Fixed
+- 2026-09-20: **Changing a website's scope had no effect on Re-check.** The
+  re-check sends conditional requests; on "304 Not Modified" the crawler
+  re-queued the links stored by the *first* crawl, which had been filtered by
+  the old scope — so a page registered under "this section" and switched to
+  "linked pages" kept yielding one page. Every same-site link is now stored
+  regardless of scope and filtered by the scope in force; changing the scope
+  clears the conditional metadata so the next Re-check truly re-reads; pages
+  indexed before this change are re-read once on their next Re-check.
+- 2026-09-20: **A page's links are now part of what is indexed.** The
+  readability extractor strips navigation, so "Steps to file your taxes →
+  /how-to-file-your-taxes-step-by-step" on an IRS page was invisible to the
+  assistant. Each web page now carries a "Links on this page" passage (same
+  site, with link text), so the assistant can say what a page points to and
+  give the address; in *Sources first* mode it must do that rather than
+  refuse.
+
+### Changed
+- 2026-09-20: URLs in answers and cited passages are clickable (open in a new
+  tab); Markdown links render too. The Cited-passage panel puts Prev / Next /
+  Open at the top.
+
 ### Changed
 - 2026-09-19: **Bundles carry a description.** Each bundle card on the Sources
   page has a description field ("2024–2026 federal tax code, IRS publications

@@ -82,6 +82,7 @@ app.patch("/api/sources/:id", wrap((req, res) => {
   const s = db.prepare("SELECT * FROM sources WHERE id=?").get(req.params.id); if (!s) throw new Error("No such source.");
   if (s.kind !== "website") throw new Error("Only websites have scope options.");
   db.prepare("UPDATE sources SET options=? WHERE id=?").run(JSON.stringify(sourceOptions(req.body.options)), s.id);
+  indexer.forgetConditionalMeta(s.id); // so the next Re-check re-reads pages instead of trusting 304s
   res.json({ ok: true, options: sourceOptions(req.body.options) });
 }));
 app.post("/api/sources/:id/retry-failed", wrap((req, res) => res.json({ job: indexer.retryFailed(Number(req.params.id)) })));

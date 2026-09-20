@@ -187,6 +187,19 @@ async function indexPathSource(source, progress, { only } = {}) {
 }
 
 // ---------------------------------------------------------------- websites
+/** A page's navigation is part of what it says: "Steps to file your taxes → /filing"
+ * is exactly what a reader uses. Readability strips it, so it is indexed as a
+ * final "Links on this page" passage (same site, with text, up to 80). */
+function withLinksPage(page) {
+  const links = (page.links || []).filter((l) => l.text && l.text.length > 2 && !/^(skip|menu|home|search)$/i.test(l.text)).slice(0, 80);
+  if (!links.length) return page.pages;
+  const text = "Links on this page:\n" + links.map((l) => `- ${l.text} — ${l.url}`).join("\n");
+  return [...page.pages, { text, label: "links" }];
+}
+/** A scope change must not be masked by "304 Not Modified" on the next re-check. */
+function forgetConditionalMeta(sourceId) {
+  open().prepare("UPDATE documents SET error=NULL WHERE source_id=? AND status='ok'").run(sourceId);
+}
 async function indexWebsiteSource(source, progress) {
   await assertEmbeddingReady();
   const db = open();
@@ -206,9 +219,9 @@ async function indexWebsiteSource(source, progress) {
     onPage: async (page) => {
       n++; seenNow.add(page.url);
       try {
-        const r = await storeDocument({ source, kind: "web", locator: page.url, title: page.title, mime: page.mime, bytes: page.bytes, pages: page.pages, page_count: page.page_count, ocr_pages: page.ocr_pages, fetched_at: now() });
+        const r = await storeDocument({ source, kind: "web", locator: page.url, title: page.title, mime: page.mime, bytes: page.bytes, pages: withLinksPage(page), page_count: page.page_count, ocr_pages: page.ocr_pages, fetched_at: now() });
         // Conditional-request metadata rides in `error` (JSON) for ok docs — a small abuse, kept local to this file.
-        db.prepare("UPDATE documents SET error=? WHERE id=? AND status='ok'").run(JSON.stringify({ etag: page.etag, lastModified: page.lastModified, links: page.links.slice(0, 500) }), r.id);
+        db.prepare("UPDATE documents SET error=? WHERE id=? AND status='ok'").run(JSON.stringify({ etag: page.etag, lastModified: page.lastModified, links: page.links.slice(0, 500).map((l) => l.url) }), r.id);
         if (r.skipped) unchanged++; else added++;
       } catch (e) { failed++; markDocError(source, page.url, "web", page.title || page.url, e.message); }
     },
@@ -254,8 +267,8 @@ function retryFailed(sourceId) {
       progress(done, failed.length, url);
       try {
         await crawl(url, { mode: "page", onPage: async (page) => {
-          await storeDocument({ source: s, kind: "web", locator: page.url, title: page.title, mime: page.mime, bytes: page.bytes, pages: page.pages, page_count: page.page_count, ocr_pages: page.ocr_pages, fetched_at: now() });
-          db.prepare("UPDATE documents SET error=? WHERE source_id=? AND locator=? AND status='ok'").run(JSON.stringify({ etag: page.etag, lastModified: page.lastModified, links: page.links.slice(0, 500) }), s.id, page.url);
+          await storeDocument({ source: s, kind: "web", locator: page.url, title: page.title, mime: page.mime, bytes: page.bytes, pages: withLinksPage(page), page_count: page.page_count, ocr_pages: page.ocr_pages, fetched_at: now() });
+          db.prepare("UPDATE documents SET error=? WHERE source_id=? AND locator=? AND status='ok'").run(JSON.stringify({ etag: page.etag, lastModified: page.lastModified, links: page.links.slice(0, 500).map((l) => l.url) }), s.id, page.url);
           ok++;
         } });
       } catch (e) { bad++; markDocError(s, url, "web", url, e.message); }
@@ -343,6 +356,15 @@ function recoverStaleState() {
   const n = db.prepare("UPDATE jobs SET status='stopped', finished_at=?, error=coalesce(error,'interrupted — the app was restarted') WHERE status IN ('queued','running')").run(now()).changes;
   db.prepare("UPDATE sources SET status = CASE WHEN doc_count > 0 THEN 'ok' ELSE 'pending' END, last_error = coalesce(last_error, 'Indexing was interrupted — run it again') WHERE status='indexing'").run();
   if (n) console.warn(`[index] ${n} job(s) were interrupted by a restart`);
+  // One-time: web pages indexed before link texts were stored carry a link
+  // list filtered by the old scope rule. Forget their conditional metadata so
+  // the next Re-check re-reads them (and picks up their links) instead of
+  // trusting a 304.
+  if (!db.prepare("SELECT 1 FROM meta WHERE key='web_links_v2'").get()) {
+    const w = db.prepare("UPDATE documents SET error=NULL WHERE kind='web' AND status='ok'").run().changes;
+    db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES ('web_links_v2', ?)").run(now());
+    if (w) console.warn(`[index] ${w} web page(s) will be re-read on their next Re-check (link texts are now indexed)`);
+  }
 }
 
-module.exports = { retryFailed, sourceErrors, embeddingReady, recoverStaleState, events, indexFiles, indexWebsites, indexSource, stop, current, jobs, startWatchers, stopWatchers, startScheduler, walk };
+module.exports = { forgetConditionalMeta, retryFailed, sourceErrors, embeddingReady, recoverStaleState, events, indexFiles, indexWebsites, indexSource, stop, current, jobs, startWatchers, stopWatchers, startScheduler, walk };

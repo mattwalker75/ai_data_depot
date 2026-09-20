@@ -81,12 +81,13 @@ async function robotsFor(origin, opts) {
   } catch { return null; }
 }
 
+/** All links on a page with their visible text: [{url, text}], deduped by url. */
 function extractLinks(html, base) {
   const cheerio = require("cheerio");
   const $ = cheerio.load(html);
-  const out = new Set();
-  $("a[href]").each((_, a) => { const n = normalize($(a).attr("href"), base); if (n) out.add(n); });
-  return [...out];
+  const out = new Map();
+  $("a[href]").each((_, a) => { const n = normalize($(a).attr("href"), base); if (!n) return; const text = $(a).text().replace(/\s+/g, " ").trim().slice(0, 120); if (!out.has(n) || (!out.get(n) && text)) out.set(n, text); });
+  return [...out].map(([url, text]) => ({ url, text }));
 }
 
 /**
@@ -115,19 +116,26 @@ async function crawl(rootUrl, { onPage, known = {}, shouldStop = () => false, lo
     let resp;
     try { resp = await fetchWithTimeout(url, { ...opts, timeout: opts.timeout_ms, userAgent: opts.user_agent, headers: cond }); }
     catch (e) { stats.errors.push({ url, error: e.name === "AbortError" ? "timed out" : e.message }); continue; }
-    if (resp.status === 304) { stats.notModified++; if (prior.links) for (const l of prior.links) if (!seen.has(l) && inScope(l, scope, mode) && depth + 1 <= opts.max_depth) { seen.add(l); queue.push({ url: l, depth: depth + 1 }); } continue; }
+    if (resp.status === 304) {
+      stats.notModified++;
+      // Stored links are every same-site link the page had; the CURRENT scope decides which to follow.
+      for (const l of prior.links || []) { const u = typeof l === "string" ? l : l.url; if (!seen.has(u) && inScope(u, scope, mode) && !SKIP_EXT.test(u) && depth + 1 <= opts.max_depth) { seen.add(u); queue.push({ url: u, depth: depth + 1 }); } }
+      continue;
+    }
     if (!resp.ok) { stats.errors.push({ url, error: `HTTP ${resp.status}` }); continue; }
     const ctype = resp.headers.get("content-type") || "";
     if (!/html|pdf/i.test(ctype)) { stats.skipped++; continue; }
     const buf = Buffer.from(await resp.arrayBuffer());
-    let doc, links = [];
+    let doc, siteLinks = [];
     try {
       doc = await extractWeb(buf, ctype, url);
-      if (/html/i.test(ctype)) links = extractLinks(buf.toString("utf8"), resp.url || url).filter((l) => (inScope(l, scope, mode) && !SKIP_EXT.test(l)) || (/\.pdf($|\?)/i.test(l) && inScope(l, scope, mode)));
+      // Keep every same-site link (with its text) so the page's navigation is searchable and a later scope change can follow it; follow only those in the current scope.
+      if (/html/i.test(ctype)) siteLinks = extractLinks(buf.toString("utf8"), resp.url || url).filter((l) => { try { return new URL(l.url).origin === scope.origin; } catch { return false; } });
     } catch (e) { stats.errors.push({ url, error: e.message }); continue; }
     stats.fetched++;
-    for (const l of links) if (!seen.has(l) && depth + 1 <= opts.max_depth) { seen.add(l); queue.push({ url: l, depth: depth + 1 }); }
-    if (onPage) await onPage({ url, title: doc.title, pages: doc.pages, mime: doc.mime, page_count: doc.page_count, ocr_pages: doc.ocr_pages, links, etag: resp.headers.get("etag"), lastModified: resp.headers.get("last-modified"), bytes: buf.length });
+    const follow = siteLinks.map((l) => l.url).filter((l) => (inScope(l, scope, mode) && !SKIP_EXT.test(l)) || (/\.pdf($|\?)/i.test(l) && inScope(l, scope, mode)));
+    for (const l of follow) if (!seen.has(l) && depth + 1 <= opts.max_depth) { seen.add(l); queue.push({ url: l, depth: depth + 1 }); }
+    if (onPage) await onPage({ url, title: doc.title, pages: doc.pages, mime: doc.mime, page_count: doc.page_count, ocr_pages: doc.ocr_pages, links: siteLinks, etag: resp.headers.get("etag"), lastModified: resp.headers.get("last-modified"), bytes: buf.length });
     log(`${stats.visited}/${opts.max_pages_per_site} ${url}`);
     if (queue.length) await sleep(opts.delay_ms);
   }
