@@ -108,7 +108,7 @@
 <!-- folder / file picker -->
 <dialog id="browse-dialog" class="dialog wide">
   <form method="dialog" class="dcard">
-    <div class="dh"><b>Choose a folder or file</b><button class="x" value="cancel" aria-label="Close">✕</button></div>
+    <div class="dh"><b>Choose a folder or file</b><button type="button" class="x" aria-label="Close">✕</button></div>
     <div class="dpath"><button type="button" class="btn sm" id="browse-up" title="Up one level">↑</button><div class="crumbs" id="browse-crumbs"></div><input class="fld mono pathin" id="browse-input" spellcheck="false" aria-label="Path"><button type="button" class="btn sm" id="browse-go">Go</button></div>
     <div class="dbody">
       <div class="dside" id="browse-shortcuts"></div>
@@ -120,7 +120,7 @@
 <!-- pick one item from a list (models) -->
 <dialog id="pick-dialog" class="dialog">
   <form method="dialog" class="dcard">
-    <div class="dh"><b id="pick-title"></b><button class="x" value="cancel" aria-label="Close">✕</button></div>
+    <div class="dh"><b id="pick-title"></b><button type="button" class="x" aria-label="Close">✕</button></div>
     <div class="dpath"><input class="fld pathin" id="pick-search" placeholder="Type to narrow the list…" aria-label="Search"></div>
     <div class="dlist picklist" id="pick-list"></div>
     <div class="df"><span class="hint" id="pick-hint"></span><div class="sp"></div><button type="button" class="btn" id="pick-cancel">Cancel</button></div>
@@ -129,7 +129,7 @@
 <!-- generic small form (new bundle, add website) -->
 <dialog id="form-dialog" class="dialog">
   <form method="dialog" class="dcard" id="form-dialog-form">
-    <div class="dh"><b id="form-title"></b><button class="x" value="cancel" aria-label="Close">✕</button></div>
+    <div class="dh"><b id="form-title"></b><button type="button" class="x" aria-label="Close">✕</button></div>
     <div class="dfields" id="form-fields"></div>
     <div class="derr" id="form-error" hidden></div>
     <div class="df"><div class="sp"></div><button type="button" class="btn" id="form-cancel">Cancel</button><button type="submit" class="btn pri" id="form-submit">Save</button></div>

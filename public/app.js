@@ -162,7 +162,7 @@ function pickFromList({ title, items, current = "", hint = "" }) {
       list.innerHTML = shown.map((m) => `<button type="button" data-m="${esc(m)}" class="${m === current ? "on" : ""}">${esc(m)}${m === current ? `<span class="cur">current</span>` : ""}</button>`).join("") || `<div class="hint" style="padding:12px">Nothing matches “${esc(search.value)}”.</div>`;
       $$("button[data-m]", list).forEach((b) => (b.onclick = () => finish(b.dataset.m))); };
     search.oninput = render; render();
-    $("#pick-cancel").onclick = () => finish(null); dlg.onclose = () => finish(null);
+    $("#pick-cancel").onclick = () => finish(null); $(".x", dlg).onclick = () => finish(null); dlg.onclose = () => finish(null);
     dlg.showModal(); search.focus();
     const cur = list.querySelector("button.on"); if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: "center" });
   });
@@ -183,6 +183,7 @@ function formDialog({ title, fields = [], submit = "Save", cancel = "Cancel", me
     form.onsubmit = async (e) => { e.preventDefault(); const v = values(); $("#form-submit").disabled = true;
       try { if (onSubmit) await onSubmit(v); finish(v); } catch (ex) { err.textContent = ex.message; err.hidden = false; } finally { $("#form-submit").disabled = false; } };
     $("#form-cancel").onclick = () => finish(null);
+    $(".x", dlg).onclick = () => finish(null);
     dlg.onclose = () => finish(null);
     dlg.showModal(); const first = $("#form-fields input"); if (first) first.focus();
   });
@@ -456,6 +457,7 @@ function browse() {
     $("#browse-input").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); go($("#browse-input").value.trim() || cur); } };
     chooseBtn.onclick = () => finish({ path: selected ? join(cur, selected) : cur });
     $("#browse-cancel").onclick = () => finish(null);
+    $(".x", dlg).onclick = () => finish(null);
     dlg.onclose = () => finish(null);
     $("#browse-index").checked = false;
     go(cur).then(() => dlg.showModal()).catch((e) => { toast(e.message); resolve(null); });
