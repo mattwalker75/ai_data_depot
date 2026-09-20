@@ -36,7 +36,8 @@
       <header class="head">
         <div class="t"><input id="session-name" class="session-name" value="New session" spellcheck="false" aria-label="Session name"><small id="session-sub">Persona: <select id="persona-select" class="inline-select"></select> · <span id="session-saved">unsaved</span></small></div>
         <div class="sp"></div>
-        <span class="priv" id="priv-badge"><i></i><span id="priv-text">—</span></span>
+        <div class="modelcol"><span class="priv" id="priv-badge"><i></i><span id="priv-text">—</span></span>
+          <label class="modeswitch" title="Sources first: converse normally, use your sources when relevant, label anything answered from general knowledge. Sources only: refuse anything your sources do not support."><input type="checkbox" id="strict-mode"><span>Sources only</span></label></div>
         <div class="menu-wrap">
           <button class="btn" id="sessions-btn">Sessions ▾</button>
           <div class="menu" id="sessions-menu" hidden>
@@ -61,7 +62,6 @@
         </div>
       </div>
       <div class="compose">
-        <label class="modeswitch" title="Sources first: converse normally, use your sources when relevant, label anything answered from general knowledge. Sources only: refuse anything your sources do not support."><input type="checkbox" id="strict-mode"><span>Sources only</span></label>
         <textarea id="composer" rows="1" placeholder="Ask anything — your sources are used when they can answer…" aria-label="Your question"></textarea>
         <button class="btn pri" id="send-btn">Send</button>
         <button class="btn" id="stop-btn" hidden>Stop</button>
