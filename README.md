@@ -33,7 +33,7 @@ bare words (`start`, `stop`, …) work too. `./INSTALL_APP.sh --help` likewise (
    "Client · Henderson"). Each bundle is a checkbox: on, the assistant may read it; off, it may not.
 2. **Indexing** — files (text, Markdown, HTML, PDF incl. scanned pages via OCR, Word, Excel, CSV,
    PowerPoint, JSON, RTF) and websites are split into passages and indexed (vector + keyword) in a
-   local SQLite database. Folders are watched for new files; websites are re-checked on a schedule.
+   local SQLite database. Folders are watched for new files; websites are re-indexed on a schedule.
    Each website source has a **scope**: *linked pages* (the page and what it links to on the same
    site, N hops — the default), *this section* (everything under its address, e.g.
    `https://www.irs.gov/privacy-disclosure` covers `/privacy-disclosure/…`), *whole site*, or *this

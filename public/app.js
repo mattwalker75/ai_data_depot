@@ -406,7 +406,7 @@ async function editScope(sourceId) {
   const v = await formDialog({ title: "What to read from this website", submit: "Save", fields: scopeFields(parseOpts(src)),
     message: `<span style="font-family:var(--mono);font-size:12px">${esc(src.location)}</span>`,
     onSubmit: async (v) => { await api(`/api/sources/${sourceId}`, { method: "PATCH", body: { options: { scope: v.scope, depth: Number(v.depth) } } }); } });
-  if (v) { await refresh(); renderSources(); toast("Saved — click Re-check to read the site with the new scope."); }
+  if (v) { await refresh(); renderSources(); toast("Saved — click Re-index to read the site with the new scope."); }
 }
 function renderSources() {
   renderReadyNotice();
@@ -416,7 +416,7 @@ function renderSources() {
     <div class="ct"><button class="toggle ${b.enabled ? "on" : ""}" data-toggle="${b.id}" title="${b.enabled ? "On — the assistant may read this bundle" : "Off"}" aria-label="Enable bundle"></button><input class="session-name" data-rename="${b.id}" value="${esc(b.name)}" aria-label="Bundle name"><span class="sp"></span>
       <button class="btn sm" data-addpath="${b.id}">+ Folder or file</button><button class="btn sm" data-addweb="${b.id}">+ Website</button><button class="btn sm" data-docs="${b.id}">Documents</button><button class="btn sm danger" data-delbundle="${b.id}">Delete</button></div>
     <input class="bdescfld" data-descr="${b.id}" value="${esc(b.description || "")}" placeholder="Describe what is in this bundle — shown under its name in Chat (e.g. “2024–2026 federal tax code, IRS publications and the Henderson client file”)" aria-label="Bundle description">
-    ${b.sources.length ? b.sources.map((s) => `<div class="srcline ${s.status === "indexing" ? "busy" : ""}" data-loc="${esc(s.location)}"><span class="k">${s.kind === "website" ? "website" : "folder"}</span><span class="loc" title="${esc(s.location)}">${esc(s.location)}</span>${s.kind === "website" ? `<button class="pill scope" data-scope="${s.id}" title="Change what is read from this site">${esc(SCOPE_LABEL[(parseOpts(s).scope) || "linked"])}${parseOpts(s).scope === "linked" || !parseOpts(s).scope ? ` · ${parseOpts(s).depth ?? 2} hops` : ""} ▾</button>` : ""}${srcMeta(s)}<span class="live"></span><button class="btn sm ${s.status === "pending" ? "pri" : ""}" data-reindex="${s.id}" data-label="${s.status === "pending" ? "Index" : s.kind === "website" ? "Re-check" : "Re-index"}" ${s.status === "indexing" ? "disabled" : ""}>${s.status === "indexing" ? `<span class="spin"></span>Indexing…` : s.status === "pending" ? "Index" : s.kind === "website" ? "Re-check" : "Re-index"}</button><button class="btn sm danger" data-delsrc="${s.id}">Remove</button></div>`).join("") : `<div class="hint">No sources yet — add a folder, a file, or a website.</div>`}
+    ${b.sources.length ? b.sources.map((s) => `<div class="srcline ${s.status === "indexing" ? "busy" : ""}" data-loc="${esc(s.location)}"><span class="k">${s.kind === "website" ? "website" : "folder"}</span><span class="loc" title="${esc(s.location)}">${esc(s.location)}</span>${s.kind === "website" ? `<button class="pill scope" data-scope="${s.id}" title="Change what is read from this site (then Re-index)">${esc(SCOPE_LABEL[(parseOpts(s).scope) || "linked"])}${parseOpts(s).scope === "linked" || !parseOpts(s).scope ? ` · ${parseOpts(s).depth ?? 2} hops` : ""} ▾</button>` : ""}${srcMeta(s)}<span class="live"></span><button class="btn sm ${s.status === "pending" ? "pri" : ""}" data-reindex="${s.id}" data-label="${s.status === "pending" ? "Index" : "Re-index"}" ${s.status === "indexing" ? "disabled" : ""}>${s.status === "indexing" ? `<span class="spin"></span>Indexing…` : s.status === "pending" ? "Index" : "Re-index"}</button><button class="btn sm danger" data-delsrc="${s.id}">Remove</button></div>`).join("") : `<div class="hint">No sources yet — add a folder, a file, or a website.</div>`}
     <div class="docs" id="docs-${b.id}" hidden></div></div>`).join("");
   $$("[data-toggle]", el).forEach((t) => t.addEventListener("click", guard(async () => { await api(`/api/bundles/${t.dataset.toggle}`, { method: "PATCH", body: { enabled: !t.classList.contains("on") } }); await refresh(); renderSources(); })));
   $$("[data-rename]", el).forEach((i) => i.addEventListener("change", guard(async () => { await api(`/api/bundles/${i.dataset.rename}`, { method: "PATCH", body: { name: i.value } }); await refresh(); })));
@@ -587,12 +587,12 @@ async function renderSettings() {
       <div class="row wide"><button class="btn pri" id="f-save">Save</button></div></div>`;
   } else if (state.sec === "websites") {
     const w = ix.websites; const srcs = state.bundles.flatMap((b) => b.sources.filter((s) => s.kind === "website").map((s) => ({ ...s, bundle: b.name })));
-    html += `<div class="card"><div class="ct">Websites <span class="sp"></span><button class="btn" id="ix-web">Re-check all websites</button><button class="btn" id="ix-stop2">Stop</button></div>
-      <table class="tbl"><tr><th>Bundle</th><th>Website (everything under it)</th><th>Status</th></tr>${srcs.map((s) => `<tr><td>${esc(s.bundle)}</td><td style="font-family:var(--mono);font-size:12px">${esc(s.location)}</td><td>${srcMeta(s)} <button class="btn sm" data-reindex="${s.id}">Re-check</button></td></tr>`).join("") || `<tr><td colspan="3" class="hint">No websites yet — add one in Sources.</td></tr>`}</table></div>
+    html += `<div class="card"><div class="ct">Websites <span class="sp"></span><button class="btn" id="ix-web">Re-index all websites</button><button class="btn" id="ix-stop2">Stop</button></div>
+      <table class="tbl"><tr><th>Bundle</th><th>Website (scope on its Sources row)</th><th>Status</th></tr>${srcs.map((s) => `<tr><td>${esc(s.bundle)}</td><td style="font-family:var(--mono);font-size:12px">${esc(s.location)}</td><td>${srcMeta(s)} <button class="btn sm" data-reindex="${s.id}">Re-index</button></td></tr>`).join("") || `<tr><td colspan="3" class="hint">No websites yet — add one in Sources.</td></tr>`}</table></div>
       <div class="card"><div class="ct">Options</div>
       <div class="row"><label>Pages per website</label><input class="fld" id="w-cap" type="number" min="1" max="20000" value="${w.max_pages_per_site}"></div>
       <div class="row"><label>Link depth</label><input class="fld" id="w-depth" type="number" min="0" max="20" value="${w.max_depth}"></div>
-      <div class="row"><label>Re-check every (hours)</label><input class="fld" id="w-hours" type="number" min="0" value="${w.recheck_hours}"> </div>
+      <div class="row"><label>Re-index every (hours)</label><input class="fld" id="w-hours" type="number" min="0" value="${w.recheck_hours}"> </div>
       <div class="row"><label>Pause between pages (ms)</label><input class="fld" id="w-delay" type="number" min="0" value="${w.delay_ms}"></div>
       <div class="row"><label>Respect robots.txt</label><span class="chk"><input type="checkbox" id="w-robots" ${w.respect_robots ? "checked" : ""}></span></div>
       <div class="row wide"><button class="btn pri" id="w-save">Save</button></div></div>`;
@@ -654,7 +654,7 @@ async function renderSettings() {
   $("#g-save") && ($("#g-save").onclick = guard(async () => { const r = await api("/api/settings", { method: "PUT", body: { server: { port: Number($("#g-port").value), host: $("#g-host").value, open_browser: $("#g-open").checked }, data_dir: $("#g-data").value.trim() } }); toast(r.changed_now.length ? "Saved — restart to apply " + r.changed_now.join(", ") : "Saved."); await renderSettings(); }));
   $("#g-reload") && ($("#g-reload").onclick = guard(async () => { await api("/api/settings/reload", { method: "POST" }); await refresh(); await renderSettings(); toast("config.json reloaded."); }));
   $("#ix-files") && ($("#ix-files").onclick = guard(async () => { if (!(await ensureModelReady())) return; await api("/api/index/files", { method: "POST", body: {} }); toast("Re-indexing files."); }));
-  $("#ix-web") && ($("#ix-web").onclick = guard(async () => { if (!(await ensureModelReady())) return; await api("/api/index/websites", { method: "POST", body: {} }); toast("Re-checking websites."); }));
+  $("#ix-web") && ($("#ix-web").onclick = guard(async () => { if (!(await ensureModelReady())) return; await api("/api/index/websites", { method: "POST", body: {} }); toast("Re-indexing websites."); }));
   $$("#ix-stop, #ix-stop2").forEach((b) => (b.onclick = guard(async () => { await api("/api/index/stop", { method: "POST" }); toast("Stopping after the current item."); })));
   $$("[data-reindex]", pane).forEach((b) => (b.onclick = guard(async () => { if (!(await ensureModelReady())) return; await api(`/api/sources/${b.dataset.reindex}/index`, { method: "POST" }); toast("Queued."); })));
 }
@@ -686,7 +686,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#new-session-btn").addEventListener("click", () => loadSessionIntoUi(newSessionObject()));
   $$("#new-bundle-btn, #new-bundle-btn2").forEach((b) => b.addEventListener("click", guard(newBundle)));
   $("#index-files-btn").addEventListener("click", guard(async () => { if (!(await ensureModelReady())) return; await api("/api/index/files", { method: "POST", body: {} }); toast("Re-indexing files."); }));
-  $("#index-web-btn").addEventListener("click", guard(async () => { if (!(await ensureModelReady())) return; await api("/api/index/websites", { method: "POST", body: {} }); toast("Re-checking websites."); }));
+  $("#index-web-btn").addEventListener("click", guard(async () => { if (!(await ensureModelReady())) return; await api("/api/index/websites", { method: "POST", body: {} }); toast("Re-indexing websites."); }));
   $("#new-persona-btn").addEventListener("click", () => editPersona({ id: null, name: "", description: "", prompt: "", builtin: false }, true));
   $$("#smenu button").forEach((b) => b.addEventListener("click", () => { state.sec = b.dataset.sec; $$("#smenu button").forEach((x) => x.classList.toggle("on", x === b)); renderSettings().catch((e) => toast(e.message)); }));
   try { await refresh(); } catch (e) { toast("Could not reach the server: " + e.message, 8000); return; }
